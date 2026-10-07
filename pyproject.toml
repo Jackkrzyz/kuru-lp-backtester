@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kuru-market-making-backtester"
+version = "0.1.0"
+description = "Download Kuru L2 snapshots and rebuild order-book history from Monad events."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "eth-abi>=5,<6",
+    "eth-hash[pycryptodome]>=0.7,<1",
+    "eth-utils>=5,<6",
+    "matplotlib>=3.9,<4",
+    "pandas>=2.2,<4",
+    "pyarrow>=18,<26",
+]
+
+[tool.setuptools]
+py-modules = [
+    "analyze_l2",
+    "backtest_jobs",
+    "backtest_server",
+    "backtest_service",
+    "backtest_worker",
+    "benchmark_lp",
+    "build_lp_frontend",
+    "compact_replays",
+    "discover_envio_intervals",
+    "discover_interval",
+    "l3_vertical_slice",
+    "multi_regime_evaluation",
+    "kuru_lp",
+    "reconstruction_validation_report",
+    "rebuild_from_chain",
+    "sdk_grid_broker",
+    "strategy_vertical_slice",
+]
+

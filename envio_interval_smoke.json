@@ -1,0 +1,145 @@
+{
+  "analysis_source": "local_resumable_cache",
+  "analysis_window_count": 9,
+  "cache": {
+    "complete": true,
+    "directory": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027",
+    "event_count": 3291,
+    "next_block": 109142028,
+    "page_count": 3,
+    "rate_limit_count": 0
+  },
+  "candidate_order_caches": [
+    {
+      "classification": "relatively_quiet",
+      "complete": true,
+      "directory": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/relatively_quiet_109132028_109142027",
+      "event_count": 69375,
+      "from_block": 109132028,
+      "page_count": 17,
+      "rate_limit_count": 1,
+      "to_block": 109142027
+    },
+    {
+      "classification": "relatively_active",
+      "complete": true,
+      "directory": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/relatively_active_109097028_109107027",
+      "event_count": 97016,
+      "from_block": 109097028,
+      "page_count": 21,
+      "rate_limit_count": 0,
+      "to_block": 109107027
+    },
+    {
+      "classification": "directional",
+      "complete": true,
+      "directory": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/directional_109117028_109127027",
+      "event_count": 95763,
+      "from_block": 109117028,
+      "page_count": 17,
+      "rate_limit_count": 2,
+      "to_block": 109127027
+    }
+  ],
+  "event_breakdown": [
+    {
+      "count": 98996,
+      "event_name": "OrderCanceled",
+      "topic0": "0xd9c089818ef223629c2af53488dc47cf2867f157caca778ce77aaa742b8c1079"
+    },
+    {
+      "count": 99408,
+      "event_name": "OrderCreated",
+      "topic0": "0xb81bbaf150467ef3096ed6220cb963abc169bffd2eb88f26c47359ef344cf94c"
+    },
+    {
+      "count": 63750,
+      "event_name": "OrdersCanceled",
+      "topic0": "0x386974f41b61738b510019ccd5a3524a43eccf0d136929e09d524e87aeeca2c4"
+    },
+    {
+      "count": 3291,
+      "event_name": "Trade",
+      "topic0": "0xf16924fba1c18c108912fcacaac7450c98eb3f2d8c0a3cdf3df7066c08f21581"
+    }
+  ],
+  "event_source": "envio_hypersync",
+  "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+  "scan": {
+    "bounded": true,
+    "broad_topics": [
+      "0xf16924fba1c18c108912fcacaac7450c98eb3f2d8c0a3cdf3df7066c08f21581"
+    ],
+    "candidate_order_topics": [
+      "0x386974f41b61738b510019ccd5a3524a43eccf0d136929e09d524e87aeeca2c4",
+      "0x49496a41b922bdba3ff7f57bb0992ab1a1a3ee95b5ae5bd7271c67861f018352",
+      "0x5f815e5292cf3b123df58ad6d4531c085d94d5717a3b02740369a04273fde96c",
+      "0xb74e966bc873b8c144fab39c9981210f50130885e89caf4556c0840cec741dcd",
+      "0xb81bbaf150467ef3096ed6220cb963abc169bffd2eb88f26c47359ef344cf94c",
+      "0xd9c089818ef223629c2af53488dc47cf2867f157caca778ce77aaa742b8c1079",
+      "0xf81d3fdea8a7ee9c5c09179882e1bce1c513a741146e453167d9e8912c8eb3aa"
+    ],
+    "effective_from_block": 109092028,
+    "effective_to_block": 109142027,
+    "inclusive_block_count": 50000,
+    "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+    "minimum_trades": 20,
+    "requested_from_block": 109092028,
+    "requested_to_block": 111092027,
+    "smoke_test": true,
+    "step_blocks": 5000,
+    "window_blocks": 10000
+  },
+  "schema_version": "1.2",
+  "selected_intervals": [
+    {
+      "approximate_price_movement_percent": -0.726418901566571,
+      "classification": "relatively_quiet",
+      "duration_basis": "first_to_last_filtered_market_event",
+      "duration_seconds": 3010,
+      "executed_volume": 10871438640440903,
+      "first_event_timestamp": "2026-09-29T20:31:40Z",
+      "first_trade_price": 0.027257,
+      "from_block": 109132028,
+      "inclusive_block_count": 10000,
+      "last_event_timestamp": "2026-09-29T21:21:50Z",
+      "last_trade_price": 0.027059,
+      "order_event_count": 69375,
+      "to_block": 109142027,
+      "trade_count": 297
+    },
+    {
+      "approximate_price_movement_percent": 1.9674430622715986,
+      "classification": "relatively_active",
+      "duration_basis": "first_to_last_filtered_market_event",
+      "duration_seconds": 2994,
+      "executed_volume": 29976229559281976,
+      "first_event_timestamp": "2026-09-29T17:35:26Z",
+      "first_trade_price": 0.027091,
+      "from_block": 109097028,
+      "inclusive_block_count": 10000,
+      "last_event_timestamp": "2026-09-29T18:25:20Z",
+      "last_trade_price": 0.027624,
+      "order_event_count": 97016,
+      "to_block": 109107027,
+      "trade_count": 1162
+    },
+    {
+      "approximate_price_movement_percent": -2.3815537834229454,
+      "classification": "directional",
+      "duration_basis": "first_to_last_filtered_market_event",
+      "duration_seconds": 2970,
+      "executed_volume": 40178913311869967,
+      "first_event_timestamp": "2026-09-29T19:16:51Z",
+      "first_trade_price": 0.027713,
+      "from_block": 109117028,
+      "inclusive_block_count": 10000,
+      "last_event_timestamp": "2026-09-29T20:06:21Z",
+      "last_trade_price": 0.027053,
+      "order_event_count": 95763,
+      "to_block": 109127027,
+      "trade_count": 893
+    }
+  ],
+  "strategy_parameters_changed": false
+}

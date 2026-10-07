@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+  "market_symbol": "MON-USDC",
+  "size_precision": 10000000000,
+  "source": {
+    "command": "discover_envio_intervals.py --smoke-test --smoke-test-blocks 50000",
+    "from_block": 109092028,
+    "to_block": 109142027,
+    "full_scan_run": false
+  },
+  "trade_cache": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/events.jsonl",
+  "intervals": {
+    "relatively_quiet": {
+      "from_block": 109132028,
+      "to_block": 109142027,
+      "trade_count": 297,
+      "executed_volume_raw": 10871438640440903,
+      "executed_volume_mon": "1087143.8640440903",
+      "price_movement_percent": "-0.7264189016",
+      "order_event_count": 69375,
+      "order_event_cache": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/relatively_quiet_109132028_109142027/events.jsonl"
+    },
+    "relatively_active": {
+      "from_block": 109097028,
+      "to_block": 109107027,
+      "trade_count": 1162,
+      "executed_volume_raw": 29976229559281976,
+      "executed_volume_mon": "2997622.9559281976",
+      "price_movement_percent": "1.9674430623",
+      "order_event_count": 97016,
+      "order_event_cache": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/relatively_active_109097028_109107027/events.jsonl"
+    },
+    "directional": {
+      "from_block": 109117028,
+      "to_block": 109127027,
+      "trade_count": 893,
+      "executed_volume_raw": 40178913311869967,
+      "executed_volume_mon": "4017891.3311869967",
+      "price_movement_percent": "-2.3815537834",
+      "order_event_count": 95763,
+      "order_event_cache": ".cache/envio_interval_discovery/0x065c9d28e428a0db40191a54d33d5b7c71a9c394_109092028_109142027/candidate_order_events/directional_109117028_109127027/events.jsonl"
+    }
+  }
+}

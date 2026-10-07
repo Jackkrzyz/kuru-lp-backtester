@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Deterministic Kuru concentrated-liquidity backtest replay" />
+    <title>Kuru Market Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-panel">
+        <div class="brand-row">
+          <div class="brand-mark">K</div>
+          <div>
+            <div class="eyebrow">Kuru Market Lab</div>
+            <h1>Backtest replay</h1>
+          </div>
+        </div>
+
+        <div class="scope-note">Verified historical results. No wallet. No live orders.</div>
+
+        <form id="backtest-form">
+          <div class="mode-switch" role="group" aria-label="Strategy mode">
+            <button class="mode-button active" data-mode="kuru_lp" type="button">Kuru LP</button>
+            <button class="mode-button" data-mode="advanced_mm_bot" type="button">Advanced MM Demo</button>
+          </div>
+          <label>
+            <span>Market</span>
+            <input id="market" value="MON / USDC" readonly />
+          </label>
+          <label>
+            <span>Historical interval</span>
+            <select id="regime">
+              <option value="relatively_active">Relatively active</option>
+              <option value="relatively_quiet">Relatively quiet</option>
+              <option value="directional">Directional move</option>
+            </select>
+          </label>
+          <div id="lp-controls">
+            <label><span>Liquidity shape</span><select id="liquidity-shape"><option value="spot">Spot</option><option value="curve">Curve</option><option value="bid_ask">Bid-Ask</option></select></label>
+            <div class="field-grid">
+              <label><span>Lower range</span><span class="input-with-suffix"><input id="lower-range-percent" type="number" min="0" max="99.999999" step="0.01" value="3" inputmode="decimal" /><b>%</b></span></label>
+              <label><span>Upper range</span><span class="input-with-suffix"><input id="upper-range-percent" type="number" min="0" step="0.01" value="3" inputmode="decimal" /><b>%</b></span></label>
+              <div id="computed-range" class="computed-range wide">Reference — · Final range —</div>
+              <label><span>Fee / flip spread</span><span class="input-with-suffix"><input id="flip-spread" type="number" min="0.01" step="0.01" value="0.30" inputmode="decimal" /><b>%</b></span></label>
+              <label class="token-field"><span>MON amount <em id="mon-driver" class="driver-tag">drives grid</em></span><span class="input-with-suffix"><input id="mon-amount" type="number" min="0" step="any" value="2000" inputmode="decimal" /><b>MON</b></span><small id="mon-requirement" class="amount-status">Required — · Entered — · Shortage —</small></label>
+              <label class="wide token-field"><span>USDC amount <em id="usdc-driver" class="driver-tag active">drives grid</em></span><span class="input-with-suffix"><input id="usdc-amount" type="number" min="0" step="any" value="60" inputmode="decimal" /><b>USDC</b></span><small id="usdc-requirement" class="amount-status">Required — · Entered — · Shortage —</small></label>
+            </div>
+            <button id="auto-fill-amounts" class="secondary-button" type="button">Auto-fill amounts</button>
+            <p class="simulator-note">Auto-fill balances this simulated position. It does not perform a token swap.</p>
+            <button id="use-minimum-amounts" class="secondary-button" type="button" disabled>Use minimum valid amounts</button>
+            <p id="minimum-viable-position" class="simulator-note">Minimum viable MON — · Corresponding USDC —</p>
+            <section class="preview-card" aria-labelledby="preview-title">
+              <div class="preview-heading"><strong id="preview-title">Exact SDK position preview</strong><span id="preview-count">—</span></div>
+              <canvas id="distribution-chart" height="150" aria-label="Generated liquidity distribution"></canvas>
+              <div id="preview-detail" class="preview-detail">—</div>
+              <div class="grid-validation" aria-live="polite">
+                <div><span>Smallest order</span><strong id="smallest-order">—</strong></div>
+                <div><span>Market minimum</span><strong id="market-minimum-order">—</strong></div>
+                <div><span>Invalid orders</span><strong id="invalid-order-count">—</strong></div>
+                <div><span>First invalid</span><strong id="offending-order">—</strong></div>
+                <div><span>Deployable</span><strong id="deployable-status">Checking</strong></div>
+              </div>
+            </section>
+          </div>
+
+          <div id="mm-controls" hidden>
+            <div class="field-grid">
+            <label><span>Starting cash</span><input id="starting-cash" readonly /></label>
+            <label><span>Starting inventory</span><input id="starting-inventory" readonly /></label>
+            <label><span>Bid offset</span><input id="bid-offset" readonly /></label>
+            <label><span>Ask offset</span><input id="ask-offset" readonly /></label>
+            <label><span>Order size</span><input id="order-size" readonly /></label>
+            <label><span>Min inventory</span><input id="minimum-inventory" readonly /></label>
+            <label><span>Max inventory</span><input id="maximum-inventory" readonly /></label>
+            <label><span>Maker fee</span><input id="maker-fee" readonly /></label>
+            <label><span>Cancel / replace</span><input id="cancel-replace" value="Enabled" readonly /></label>
+            </div>
+          </div>
+
+          <details class="advanced-settings">
+            <summary>Advanced simulation</summary>
+            <label class="checkbox-row"><input id="absolute-range-mode" type="checkbox" /><span>Enter absolute prices directly</span></label>
+            <div id="absolute-range-fields" class="field-grid" hidden>
+              <label><span>Minimum price</span><input id="minimum-price" value="0.0263" inputmode="decimal" /></label>
+              <label><span>Maximum price</span><input id="maximum-price" value="0.02795" inputmode="decimal" /></label>
+            </div>
+            <label><span>Participation cap</span><select id="scenario"><option value="max_5_percent">5% of transaction volume</option><option value="max_10_percent" selected>10% of transaction volume</option><option value="max_25_percent">25% of transaction volume</option><option value="uncapped">Uncapped — high impact risk</option></select></label>
+            <div class="field-grid">
+              <label><span>Inclusion latency</span><input id="inclusion-latency" value="1 block" readonly /></label>
+              <label><span>Action cost</span><input id="action-fee" value="0 USDC" readonly /></label>
+              <label class="wide"><span>Impact threshold</span><input id="impact-threshold" value="25%" readonly /></label>
+            </div>
+          </details>
+
+          <button class="run-button" type="submit">
+            <span id="run-button-label">Run backtest</span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <button id="cancel-backtest" class="secondary-button" type="button" hidden>Cancel backtest</button>
+        </form>
+        <p id="form-help" class="form-help">Run a new local Kuru LP simulation with this exact SDK-generated position.</p>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <div id="engine-label" class="eyebrow">Kuru LP engine</div>
+            <h2 id="run-title">MON / USDC · Relatively active</h2>
+          </div>
+          <div class="header-actions">
+            <div id="scenario-badge" class="scenario-badge">10% participation cap</div>
+            <div id="status" class="status" role="status">No run yet</div>
+          </div>
+        </header>
+
+        <div id="impact-warning" class="impact-warning" hidden></div>
+
+        <section class="chart-card">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Reconstructed market and simulated quotes</div>
+              <div id="frame-time" class="chart-subtitle">—</div>
+            </div>
+            <div class="legend" aria-label="Chart legend">
+              <span><i class="line bid"></i>Best bid</span>
+              <span><i class="line mid"></i>Midpoint</span>
+              <span><i class="line ask"></i>Best ask</span>
+              <span><i class="dot buy"></i>Buy fill</span>
+              <span><i class="dot sell"></i>Sell fill</span>
+            </div>
+          </div>
+          <canvas id="price-chart" height="390" aria-label="Market replay chart"></canvas>
+          <div class="chart-divider"></div>
+          <div class="equity-label-row">
+            <span>Portfolio performance</span>
+            <span class="legend"><span><i class="line equity"></i>Strategy equity</span><span><i class="line hold"></i>Hold baseline</span></span>
+          </div>
+          <canvas id="equity-chart" height="170" aria-label="Strategy and hold equity chart"></canvas>
+
+          <div class="playback-row">
+            <button id="play-button" class="play-button" type="button" aria-label="Play replay">▶</button>
+            <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Replay timeline" />
+            <div class="frame-counter"><span id="current-frame">1</span> / <span id="total-frames">—</span></div>
+            <div class="speed-controls" aria-label="Playback speed">
+              <button class="speed-button active" data-speed="1" type="button">1x</button>
+              <button class="speed-button" data-speed="10" type="button">10x</button>
+              <button class="speed-button" data-speed="50" type="button">50x</button>
+              <button class="speed-button" data-speed="100" type="button">100x</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="lower-grid">
+          <div class="results-card">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Final outcome</div>
+                <h3>Results</h3>
+              </div>
+              <div id="result-state" class="result-state">Deterministic</div>
+            </div>
+            <div id="run-identity" class="run-identity" hidden>
+              <div><span>Run ID</span><code id="run-id">—</code></div>
+              <div><span>Normalized configuration</span><code id="normalized-config">—</code></div>
+              <div><span>Hashes</span><code id="result-hashes">—</code></div>
+            </div>
+            <div class="metric-grid">
+              <article class="metric primary"><span>Strategy P&amp;L</span><strong id="strategy-pnl">—</strong></article>
+              <article class="metric"><span>Hold P&amp;L</span><strong id="hold-pnl">—</strong></article>
+              <article class="metric"><span>Excess P&amp;L</span><strong id="excess-pnl">—</strong></article>
+              <article class="metric"><span>Maximum drawdown</span><strong id="drawdown">—</strong></article>
+              <article class="metric"><span>Turnover</span><strong id="turnover">—</strong></article>
+              <article class="metric"><span id="inventory-label">Inventory composition</span><strong id="ending-inventory">—</strong></article>
+              <article class="metric"><span>Buy / sell fills</span><strong id="fill-counts">—</strong></article>
+              <article class="metric"><span id="actions-label">Initial + flip orders</span><strong id="order-actions">—</strong></article>
+              <article class="metric"><span id="extra-one-label">Earned flip spread</span><strong id="extra-one">—</strong></article>
+              <article class="metric"><span id="extra-two-label">Time in range</span><strong id="extra-two">—</strong></article>
+              <article class="metric"><span id="extra-three-label">Capital utilization</span><strong id="extra-three">—</strong></article>
+              <article class="metric wide"><span id="break-even-label">Required MON / USDC ratio</span><strong id="break-even-cost">—</strong></article>
+            </div>
+          </div>
+
+          <div class="orders-card">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">Current frame</div>
+                <h3>Simulated orders</h3>
+              </div>
+              <span id="block-label" class="block-label">Block —</span>
+            </div>
+            <div id="orders-list" class="orders-list"></div>
+            <div class="event-strip">
+              <span>Frame actions</span>
+              <strong id="frame-actions">—</strong>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="kuru_sdk_adapter.js" defer></script>
+    <script src="request_gate.js" defer></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>

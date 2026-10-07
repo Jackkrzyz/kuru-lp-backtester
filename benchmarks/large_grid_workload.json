@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "name": "large_grid_regression",
+  "origin": "Replacement workload. The original stalled POST body was not persisted by the old synchronous API and could not be recovered after the server process exited.",
+  "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+  "interval": {
+    "name": "relatively_active",
+    "from_block": 109097028,
+    "to_block": 109107027,
+    "event_count": 98178
+  },
+  "configuration": {
+    "engine": "kuru_lp",
+    "shape": "spot",
+    "minimum_price": "0.025",
+    "maximum_price": "0.03",
+    "fee_percent": "0.01",
+    "mon_amount": "600000",
+    "usdc_amount": "18000",
+    "amount_driver": "both",
+    "inclusion_delay_blocks": 1,
+    "max_transaction_participation_percent": "10",
+    "maker_fee_bps": "0",
+    "fixed_action_fee": "0",
+    "material_impact_threshold_percent": "25"
+  },
+  "generated_grid": {
+    "sdk_package": "@kuru-labs/kuru-sdk",
+    "sdk_version": "0.0.95",
+    "sdk_git_head": "c6a1e9eced12d634fa879ec46c52baff8a50f3c3",
+    "bid_count": 1070,
+    "ask_count": 1430,
+    "order_count": 2500,
+    "required_mon_raw": "599999999999972000000000",
+    "required_usdc_raw": "17999999030",
+    "min_size_error": false
+  },
+  "inputs": {
+    "event_file": "validation_output/relatively_active/source_events.jsonl",
+    "event_file_sha256": "04bc2d4e2f59206586f6b78e95a9700820bcff7a554f1eb060486409f331809d",
+    "validation_summary_sha256": "3992acae3f0b08b8b3ef458cdf7ec8f158d72090f7d80c12ce5ebdde643c5f10",
+    "checkpoint_file": ".cache/backtest_intervals/relatively_active/checkpoint.json",
+    "checkpoint_file_sha256": "8cd3d48f75e07c2edb8e59fd09ab1c1ae85b5fc7f707e4bb63ea816985462fb1"
+  },
+  "engine": {
+    "version": "kuru-lp-local-v14",
+    "source_commit": null,
+    "source_commit_note": "No Git metadata is available in this workspace.",
+    "source_sha256": {
+      "kuru_lp.py": "097366e8db59e918ba4e8235114cd762e8d37ecd7650b0efb5c5c53d22c4fe1f",
+      "backtest_service.py": "2f03508d47b09b38b46fb2109c8f9a0453b49f904d6080d0abe67cf5e7dba382",
+      "compact_replays.py": "97977155a504f84300c3cbfa91be753e5ccae515dc6b3af454532c07f0b45304",
+      "l3_vertical_slice.py": "b8b50bb4dab74e0a8f9251689fea2869ff13a6598896d48b8a0b836e828c652c",
+      "strategy_vertical_slice.py": "2e1f73f777e8bb687cb8853086a6dc954fcff62f9ed49601c91aacf08e745947",
+      "sdk_reference/browser_adapter.js": "5e5b5106ad6dea8281f73c6ba370c072682570f4aaf90c9a6be822cd642ebd84"
+    }
+  }
+}

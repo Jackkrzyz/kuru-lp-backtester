@@ -1,0 +1,97 @@
+{
+  "checkpoint": {
+    "active_order_count": 265,
+    "ask_level_count": 162,
+    "bid_level_count": 82,
+    "block_number": 44853799,
+    "extra_local_levels": 0,
+    "matched_level_count": 244,
+    "maximum_price_error_raw": 0,
+    "maximum_size_error_raw": 0,
+    "missing_local_levels": 0
+  },
+  "event_counts": {
+    "FlipOrderUpdated": 2,
+    "FlippedOrderCreated": 2,
+    "OrderCanceled": 234,
+    "OrderCreated": 234,
+    "OrdersCanceled": 117,
+    "Trade": 7,
+    "VaultParamsUpdated": 2
+  },
+  "event_parity": {
+    "envio_event_count": 598,
+    "missing_from_envio": 0,
+    "missing_from_rpc": 0,
+    "rpc_event_count": 598,
+    "status": "pass"
+  },
+  "event_source": "envio_hypersync",
+  "final_result": {
+    "cash": -4.5886000000000005,
+    "combined_contract_midpoint": 0.022858,
+    "cumulative_pnl": -0.017000000000000348,
+    "explicit_midpoint": 0.022858,
+    "fees_included": false,
+    "gas_included": false,
+    "gross_pnl_at_combined_contract_midpoint": -0.017000000000000348,
+    "inventory": 200.0,
+    "marked_portfolio_value": -0.017000000000000348
+  },
+  "interval": {
+    "from_block": 44853800,
+    "inclusive_block_count": 2301,
+    "to_block": 44856100
+  },
+  "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+  "ohlc": {
+    "generated": false,
+    "required_source_if_added": "Trade events only"
+  },
+  "passive_order": {
+    "downstream_size_raw": 7533298252191,
+    "filled_size_raw": 2000000000000,
+    "final_cash": -4.5886000000000005,
+    "final_inventory": 200.0,
+    "final_mark": 0.022858,
+    "gross_pnl": -0.017000000000000348,
+    "placed_before_transaction": "0x3208b1a7f481a47d026531a2f532ad18b6781854f8a2f3ccc1f7507e41cdbe3b",
+    "price_raw": 2294300,
+    "queue_ahead_orders": 1,
+    "queue_ahead_size_raw": 116701747809,
+    "side": "buy",
+    "size_raw": 2000000000000
+  },
+  "schema_version": "1.0",
+  "timeline": {
+    "backend_is_complete": true,
+    "first_timestamp": "2025-12-27T20:44:27Z",
+    "last_timestamp": "2025-12-27T21:00:04Z",
+    "playback_delay_seconds": 0,
+    "record_count": 600
+  },
+  "validation": {
+    "extra_local_levels": 0,
+    "maximum_aggregate_size_error": 0.0,
+    "maximum_aggregate_size_error_raw": 0,
+    "maximum_midpoint_error": 0,
+    "maximum_price_level_error": 0.0,
+    "maximum_price_level_error_raw": 0,
+    "missing_local_levels": 0,
+    "queue_invariant_checks": 599,
+    "queue_invariant_failures": 0,
+    "queue_invariant_status": "pass",
+    "validated_block_count": 9,
+    "validated_blocks": [
+      44853800,
+      44853836,
+      44853995,
+      44854039,
+      44855470,
+      44855818,
+      44855908,
+      44856040,
+      44856100
+    ]
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "cancellation_summary_audit": {
+    "duplicate_individual_cancellation_count": 0,
+    "individual_cancellations_not_in_summary": 0,
+    "individual_order_cancellation_count": 25724,
+    "replay_rule": "OrdersCanceled and FlipOrdersCanceled are summary-only; only OrderCanceled mutates the L3 book",
+    "status": "pass",
+    "summary_event_count": 17873,
+    "summary_ids_missing_individual_cancellation": 0,
+    "summary_order_ids_applied_as_cancellations": 0,
+    "summary_referenced_nonzero_order_ids": 25724,
+    "summary_zero_sentinel_count": 41
+  },
+  "checkpoint": {
+    "active_order_count": 43,
+    "ask_level_count": 23,
+    "bid_level_count": 15,
+    "block_number": 109132027,
+    "extra_local_levels": 0,
+    "matched_level_count": 38,
+    "maximum_price_error_raw": 0,
+    "maximum_size_error_raw": 0,
+    "missing_local_levels": 0
+  },
+  "event_counts": {
+    "OrderCanceled": 25724,
+    "OrderCreated": 25778,
+    "OrdersCanceled": 17873,
+    "Trade": 297
+  },
+  "event_input": {
+    "ordering": "block_number,transaction_index,log_index",
+    "path": "source_events.jsonl",
+    "payload_source": "envio_hypersync_cache_verified_by_rpc",
+    "record_count": 69672
+  },
+  "event_parity": {
+    "envio_event_count": 69672,
+    "missing_from_envio": 0,
+    "missing_from_rpc": 0,
+    "rpc_event_count": 69672,
+    "status": "pass"
+  },
+  "event_source": "envio_hypersync_cache_verified_by_rpc",
+  "final_result": {
+    "cash": 5.4517999999999995,
+    "combined_contract_midpoint": 0.027037,
+    "cumulative_pnl": 0.04439999999999955,
+    "explicit_midpoint": 0.027037,
+    "fees_included": false,
+    "gas_included": false,
+    "gross_pnl_at_combined_contract_midpoint": 0.04439999999999955,
+    "inventory": -200.0,
+    "marked_portfolio_value": 0.04439999999999955
+  },
+  "interval": {
+    "discovery_order_event_count": 69375,
+    "discovery_trade_count": 297,
+    "executed_volume_mon": "1087143.8640440903",
+    "executed_volume_raw": 10871438640440903,
+    "from_block": 109132028,
+    "inclusive_block_count": 10000,
+    "name": "relatively_quiet",
+    "to_block": 109142027,
+    "trade_price_movement_percent": "-0.7264189016"
+  },
+  "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+  "ohlc": {
+    "generated": false,
+    "required_source_if_added": "Trade events only"
+  },
+  "passive_order": {
+    "downstream_size_raw": 233254369596155,
+    "filled_size_raw": 2000000000000,
+    "final_cash": 5.4517999999999995,
+    "final_inventory": -200.0,
+    "final_mark": 0.027037,
+    "gross_pnl": 0.04439999999999955,
+    "placed_before_transaction": "0x0fbba1cc7db7022a3dfd1438754beb90c69736d887e81db2b5b50d238dc4a6cd",
+    "price_raw": 2725900,
+    "queue_ahead_orders": 1,
+    "queue_ahead_size_raw": 69967597915060,
+    "side": "sell",
+    "size_raw": 2000000000000
+  },
+  "schema_version": "1.0",
+  "timeline": {
+    "backend_is_complete": true,
+    "first_timestamp": "2026-09-29T20:31:32Z",
+    "last_timestamp": "2026-09-29T21:21:51Z",
+    "playback_delay_seconds": 0,
+    "record_count": 69674
+  },
+  "validation": {
+    "extra_local_levels": 0,
+    "maximum_aggregate_size_error": 0.0,
+    "maximum_aggregate_size_error_raw": 0,
+    "maximum_midpoint_error": 0,
+    "maximum_price_level_error": 0.0,
+    "maximum_price_level_error_raw": 0,
+    "missing_local_levels": 0,
+    "queue_invariant_checks": 69673,
+    "queue_invariant_failures": 0,
+    "queue_invariant_status": "pass",
+    "validated_block_count": 7,
+    "validated_blocks": [
+      109132028,
+      109133694,
+      109135361,
+      109137027,
+      109138694,
+      109140360,
+      109142027
+    ]
+  }
+}

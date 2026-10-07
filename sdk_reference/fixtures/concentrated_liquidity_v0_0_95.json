@@ -1,0 +1,366 @@
+{
+  "schema_version": "1.0",
+  "sdk": {
+    "package": "@kuru-labs/kuru-sdk",
+    "version": "0.0.95",
+    "npm_git_head": "c6a1e9eced12d634fa879ec46c52baff8a50f3c3"
+  },
+  "inputs": {
+    "minFeesPps": "3000",
+    "startPrice": "2630000",
+    "endPrice": "2795000",
+    "bestAskPrice": "2713900",
+    "pricePrecision": "100000000",
+    "sizePrecision": "10000000000",
+    "quoteAssetDecimals": "6",
+    "baseAssetDecimals": "18",
+    "tickSize": "100",
+    "minSize": "2000000000000",
+    "quoteLiquidity": "60000000",
+    "baseLiquidity": "2000000000000000000000"
+  },
+  "shapes": {
+    "spot": {
+      "bids": [
+        {
+          "price": "2709500",
+          "liquidity": "2013118820647",
+          "flipPrice": "2725700"
+        },
+        {
+          "price": "2701400",
+          "liquidity": "2019155047214",
+          "flipPrice": "2717600"
+        },
+        {
+          "price": "2693400",
+          "liquidity": "2025152389004",
+          "flipPrice": "2709500"
+        },
+        {
+          "price": "2685400",
+          "liquidity": "2031185463821",
+          "flipPrice": "2701400"
+        },
+        {
+          "price": "2677400",
+          "liquidity": "2037254591971",
+          "flipPrice": "2693400"
+        },
+        {
+          "price": "2669400",
+          "liquidity": "2043360097603",
+          "flipPrice": "2685400"
+        },
+        {
+          "price": "2661500",
+          "liquidity": "2049425303228",
+          "flipPrice": "2677400"
+        },
+        {
+          "price": "2653600",
+          "liquidity": "2055526622152",
+          "flipPrice": "2669400"
+        },
+        {
+          "price": "2645700",
+          "liquidity": "2061664377875",
+          "flipPrice": "2661500"
+        },
+        {
+          "price": "2637800",
+          "liquidity": "2067838897771",
+          "flipPrice": "2653600"
+        },
+        {
+          "price": "2630000",
+          "liquidity": "2073971651917",
+          "flipPrice": "2645700"
+        }
+      ],
+      "asks": [
+        {
+          "price": "2791400",
+          "liquidity": "2000000000000",
+          "flipPrice": "2774600"
+        },
+        {
+          "price": "2783100",
+          "liquidity": "2000000000000",
+          "flipPrice": "2766400"
+        },
+        {
+          "price": "2774800",
+          "liquidity": "2000000000000",
+          "flipPrice": "2758100"
+        },
+        {
+          "price": "2766600",
+          "liquidity": "2000000000000",
+          "flipPrice": "2750000"
+        },
+        {
+          "price": "2758400",
+          "liquidity": "2000000000000",
+          "flipPrice": "2741800"
+        },
+        {
+          "price": "2750200",
+          "liquidity": "2000000000000",
+          "flipPrice": "2733700"
+        },
+        {
+          "price": "2742000",
+          "liquidity": "2000000000000",
+          "flipPrice": "2725500"
+        },
+        {
+          "price": "2733800",
+          "liquidity": "2000000000000",
+          "flipPrice": "2717400"
+        },
+        {
+          "price": "2725700",
+          "liquidity": "2000000000000",
+          "flipPrice": "2709300"
+        },
+        {
+          "price": "2717600",
+          "liquidity": "2000000000000",
+          "flipPrice": "2701300"
+        }
+      ],
+      "quoteLiquidity": "60000000",
+      "baseLiquidity": "2000000000000000000000",
+      "minSizeError": false
+    },
+    "curve": {
+      "bids": [
+        {
+          "price": "2709500",
+          "liquidity": "3690714150211",
+          "flipPrice": "2725700"
+        },
+        {
+          "price": "2701400",
+          "liquidity": "3365255049233",
+          "flipPrice": "2717600"
+        },
+        {
+          "price": "2693400",
+          "liquidity": "3037725547634",
+          "flipPrice": "2709500"
+        },
+        {
+          "price": "2685400",
+          "liquidity": "2708244578088",
+          "flipPrice": "2701400"
+        },
+        {
+          "price": "2677400",
+          "liquidity": "2376794647792",
+          "flipPrice": "2693400"
+        },
+        {
+          "price": "2669400",
+          "liquidity": "2043358054243",
+          "flipPrice": "2685400"
+        },
+        {
+          "price": "2661500",
+          "liquidity": "1707852710876",
+          "flipPrice": "2677400"
+        },
+        {
+          "price": "2653600",
+          "liquidity": "1370349709827",
+          "flipPrice": "2669400"
+        },
+        {
+          "price": "2645700",
+          "liquidity": "1030831156215",
+          "flipPrice": "2661500"
+        },
+        {
+          "price": "2637800",
+          "liquidity": "689278940783",
+          "flipPrice": "2653600"
+        },
+        {
+          "price": "2630000",
+          "liquidity": "345661593155",
+          "flipPrice": "2645700"
+        }
+      ],
+      "asks": [
+        {
+          "price": "2717600",
+          "liquidity": "4014236826611",
+          "flipPrice": "2701300"
+        },
+        {
+          "price": "2725700",
+          "liquidity": "3602076897677",
+          "flipPrice": "2709300"
+        },
+        {
+          "price": "2733800",
+          "liquidity": "3192359353281",
+          "flipPrice": "2717400"
+        },
+        {
+          "price": "2742000",
+          "liquidity": "2784960977388",
+          "flipPrice": "2725500"
+        },
+        {
+          "price": "2750200",
+          "liquidity": "2379992000581",
+          "flipPrice": "2733700"
+        },
+        {
+          "price": "2758400",
+          "liquidity": "1977430756960",
+          "flipPrice": "2741800"
+        },
+        {
+          "price": "2766600",
+          "liquidity": "1577255837490",
+          "flipPrice": "2750000"
+        },
+        {
+          "price": "2774800",
+          "liquidity": "1179446086204",
+          "flipPrice": "2758100"
+        },
+        {
+          "price": "2783100",
+          "liquidity": "783952427149",
+          "flipPrice": "2766400"
+        },
+        {
+          "price": "2791400",
+          "liquidity": "390810704306",
+          "flipPrice": "2774600"
+        }
+      ],
+      "quoteLiquidity": "60000000",
+      "baseLiquidity": "2188252186765175966559",
+      "minSizeError": true
+    },
+    "bid_ask": {
+      "bids": [
+        {
+          "price": "2709500",
+          "liquidity": "335519464845",
+          "flipPrice": "2725700"
+        },
+        {
+          "price": "2701400",
+          "liquidity": "673051006885",
+          "flipPrice": "2717600"
+        },
+        {
+          "price": "2693400",
+          "liquidity": "1012575180069",
+          "flipPrice": "2709500"
+        },
+        {
+          "price": "2685400",
+          "liquidity": "1354122287182",
+          "flipPrice": "2701400"
+        },
+        {
+          "price": "2677400",
+          "liquidity": "1697710461641",
+          "flipPrice": "2693400"
+        },
+        {
+          "price": "2669400",
+          "liquidity": "2043358054243",
+          "flipPrice": "2685400"
+        },
+        {
+          "price": "2661500",
+          "liquidity": "2390993796730",
+          "flipPrice": "2677400"
+        },
+        {
+          "price": "2653600",
+          "liquidity": "2740699423424",
+          "flipPrice": "2669400"
+        },
+        {
+          "price": "2645700",
+          "liquidity": "3092493476206",
+          "flipPrice": "2661500"
+        },
+        {
+          "price": "2637800",
+          "liquidity": "3446394719083",
+          "flipPrice": "2653600"
+        },
+        {
+          "price": "2630000",
+          "liquidity": "3802277562736",
+          "flipPrice": "2645700"
+        }
+      ],
+      "asks": [
+        {
+          "price": "2717600",
+          "liquidity": "401423682661",
+          "flipPrice": "2701300"
+        },
+        {
+          "price": "2725700",
+          "liquidity": "800461532817",
+          "flipPrice": "2709300"
+        },
+        {
+          "price": "2733800",
+          "liquidity": "1197134757480",
+          "flipPrice": "2717400"
+        },
+        {
+          "price": "2742000",
+          "liquidity": "1591406272793",
+          "flipPrice": "2725500"
+        },
+        {
+          "price": "2750200",
+          "liquidity": "1983326667151",
+          "flipPrice": "2733700"
+        },
+        {
+          "price": "2758400",
+          "liquidity": "2372916908352",
+          "flipPrice": "2741800"
+        },
+        {
+          "price": "2766600",
+          "liquidity": "2760197715607",
+          "flipPrice": "2750000"
+        },
+        {
+          "price": "2774800",
+          "liquidity": "3145189563211",
+          "flipPrice": "2758100"
+        },
+        {
+          "price": "2783100",
+          "liquidity": "3527785922173",
+          "flipPrice": "2766400"
+        },
+        {
+          "price": "2791400",
+          "liquidity": "3908107043060",
+          "flipPrice": "2774600"
+        }
+      ],
+      "quoteLiquidity": "60000000",
+      "baseLiquidity": "2168795006530990319066",
+      "minSizeError": true
+    }
+  }
+}

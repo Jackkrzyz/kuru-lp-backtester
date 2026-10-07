@@ -1,0 +1,40 @@
+{
+  "files": {
+    "error_chart": {
+      "path": "reconstruction_error.png",
+      "sha256": "93adc1906c083ac881c20ef77103a43d74294e611cf0714c0f6ecc1041f2526d",
+      "size_bytes": 70937
+    },
+    "price_chart": {
+      "path": "reconstructed_prices.png",
+      "sha256": "0a1ee1c32caad8e9ef250837fc18e5b26c9a6b691588d063f4a81fc2e1f201bf",
+      "size_bytes": 161033
+    },
+    "report": {
+      "path": "report.md",
+      "sha256": "507098781f22cea8c33695c374974240c8fc152d2eaec7c746a8fb3c83efa08e",
+      "size_bytes": 2231
+    },
+    "source_events": {
+      "path": "source_events.jsonl",
+      "sha256": "aaea711b6719b6f9d3aad74caf01d581e64fb677d186716c611bd320fcd3bc8a",
+      "size_bytes": 66162781
+    },
+    "summary": {
+      "path": "summary.json",
+      "sha256": "706654aa69c297e6696eae324ddbbd182b7d95e60dc6ccb0e20f8e628091486f",
+      "size_bytes": 3602
+    },
+    "timeline": {
+      "path": "timeline.jsonl",
+      "sha256": "ab880e6edd646454393e11add235abae1820128ebabf188b8ebce1c96f532770",
+      "size_bytes": 59364462
+    },
+    "validation_rows": {
+      "path": "validation_rows.json",
+      "sha256": "c8101951212111aa19f07886d8d5911b2cbd40c968be41663466dbe3509ca283",
+      "size_bytes": 2695
+    }
+  },
+  "schema_version": "1.0"
+}
