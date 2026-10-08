@@ -3,6 +3,8 @@
 ## Documentation map
 
 - [Codebase guide](CODEBASE_GUIDE.md): module ownership, units, ordering, invariants, strategy rules, and test coverage.
+- [General historical system](HISTORICAL_SYSTEM.md): block-range architecture, coverage, indexing, golden parity, and lifetime size estimate.
+- [Generalization results](GENERALIZATION_RESULTS.md): golden parity, browser evidence, tests, current gaps, and storage estimates.
 - [Performance and accuracy audit](PERFORMANCE_ACCURACY_AUDIT.md): two full static review passes, prioritized findings, test gaps, and a safe optimization plan.
 - [Live Kuru LP request path](BACKTEST_REQUEST_PATH.md): form-to-API-to-engine-to-replay behavior and integration results.
 - [Official SDK reference](SDK_REFERENCE.md): pinned Kuru SDK version and fixture process.
@@ -20,6 +22,8 @@ This project has data, reconstruction, backtest, and replay tools for the Kuru M
 - `discover_envio_intervals.py` makes one resumable Envio pass and analyzes overlapping windows locally.
 - `l3_vertical_slice.py` runs an Envio-first L3 queue replay, RPC parity checks, historical L2 checks, and one passive-order simulation.
 - `kuru_lp.py` runs the Kuru concentrated-liquidity LP vertical slice with the official SDK grid rules.
+- `historical_system.py` provides local event, checkpoint, reconstruction, cursor, and validation components for arbitrary covered block ranges.
+- `index_history.py` downloads one bounded, resumable canonical event partition into unvalidated staging storage.
 
 The market address is `0x065c9d28e428a0db40191a54d33d5b7c71a9c394`.
 
@@ -281,7 +285,25 @@ Start the local frontend and backtest API:
 python backtest_server.py --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. Kuru LP is the default mode. Select an interval and edit the position. **Run backtest** sends the exact form values and exact preview grid to the local API. The API runs a new LP simulation over the already validated local event file. It does not download or reconstruct the interval again. Playback stays client-side. Changing playback speed does not run Python or recompute the backtest.
+Open `http://127.0.0.1:8000`. Kuru LP is the default mode. Select any block range inside one complete validated L3 segment and edit the position. **Run backtest** sends the market address, `from_block`, `to_block`, exact form values, and exact preview grid to the local API. A named regime is not required. The API reconstructs the requested start from a local verified checkpoint and local indexed events. It does not call Envio or RPC. Playback stays client-side. Changing playback speed does not run Python or recompute the backtest.
+
+If the browser runs on Windows and the server runs in WSL, WSL localhost forwarding might be unavailable. In that case, start the server with:
+
+```bash
+python backtest_server.py --host 0.0.0.0 --port 8000
+```
+
+Run `hostname -I` in WSL. Open `http://<first-wsl-address>:8000` in the Windows browser. Keep the server terminal open. Use `ss -ltnp | grep ':8000'` to find a process that still uses the port.
+
+The history chart is made from Trade events. Complete validated L3 coverage is continuous from block 109092028 through block 109142027. The API accepts any interval inside these inclusive bounds and rejects ranges outside local validated coverage. The old quiet, active, and directional names remain as convenient golden presets only.
+
+The block-range request path is:
+
+```text
+HistoricalEventStore -> CheckpointStore -> ReconstructionEngine -> ReplayCursor -> KuruLpBacktestEngine
+```
+
+See [the general historical system guide](HISTORICAL_SYSTEM.md) for current coverage and indexing rules.
 
 The primary range inputs are percentages below and above the selected interval's first-block reconstructed midpoint. The UI calculates the absolute limits with integer math. It rounds the lower limit down to a tick and the upper limit up to a tick. It shows the reference midpoint and final absolute limits. Advanced simulation settings can use direct absolute limits.
 

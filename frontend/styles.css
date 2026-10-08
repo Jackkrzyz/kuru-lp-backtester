@@ -161,6 +161,66 @@ select:disabled { color: #a8b9b6; cursor: not-allowed; }
   background: #0b1917;
   padding: 10px;
 }
+.history-range-card {
+  margin: 2px 0 14px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 10px;
+  background: #0b1917;
+  padding: 10px;
+}
+#history-range-chart { width: 100%; height: 88px; margin-top: 7px; }
+.range-sliders {
+  position: relative;
+  height: 38px;
+  margin-top: -3px;
+  --range-start-percent: 0%;
+  --range-end-percent: 100%;
+}
+.range-sliders::before,
+.range-sliders::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  height: 4px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.range-sliders::before {
+  right: 0;
+  left: 0;
+  background: #29413d;
+}
+.range-sliders::after {
+  left: var(--range-start-percent);
+  width: calc(var(--range-end-percent) - var(--range-start-percent));
+  background: var(--blue);
+}
+.range-sliders input[type="range"] {
+  position: absolute; inset: 0; z-index: 1; height: 30px; padding: 0; border: 0;
+  appearance: none; -webkit-appearance: none;
+  background: transparent; pointer-events: none;
+}
+.range-sliders input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.range-sliders input[type="range"]::-moz-range-track,
+.range-sliders input[type="range"]::-moz-range-progress {
+  height: 4px;
+  background: transparent;
+}
+.range-sliders input[type="range"]::-webkit-slider-thumb {
+  width: 15px; height: 15px; margin-top: -5.5px; border: 2px solid #dbe8e5;
+  border-radius: 50%; appearance: none; -webkit-appearance: none;
+  background: var(--blue); pointer-events: auto; cursor: grab;
+}
+.range-sliders input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border: 2px solid #dbe8e5;
+  border-radius: 50%; background: var(--blue); pointer-events: auto; cursor: grab;
+}
+.range-block-fields { margin-top: -8px; }
+#range-coverage-status.available { color: var(--lime); }
+#range-coverage-status.unavailable { color: #f2b77d; }
 .preview-heading { display: flex; justify-content: space-between; gap: 8px; color: #dce9e6; font-size: 10px; }
 .preview-heading span { color: #7e9a94; }
 #distribution-chart { height: 108px; margin-top: 7px; }

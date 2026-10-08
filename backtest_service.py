@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import compact_replays
+import historical_system
 import kuru_lp
 import l3_vertical_slice as l3
 import strategy_vertical_slice as strategy
@@ -65,13 +66,18 @@ class IntervalData:
     name: str
     validation: dict[str, Any]
     book: l3.L3Book
-    events: list[l3.ReplayEvent]
+    events: Any
     timestamps: dict[int, int]
     parameters: dict[str, int]
     checkpoint_timestamp: int
     source_sha256: str
     event_file_sha256: str
     checkpoint_sha256: str
+    start_market: dict[str, int] | None = None
+    generalized_range: bool = False
+    checkpoint_block: int | None = None
+    golden_fixture: str | None = None
+    reconstructed_start: historical_system.ReconstructedStart | None = None
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -424,6 +430,19 @@ class BacktestService:
         self._interval_lock = threading.Lock()
         self._lock = nullcontext()
         self._manifest = json.loads(INTERVAL_MANIFEST.read_text(encoding="utf-8"))
+        self._history_validation = historical_system.ValidationLayer()
+        self._event_store = historical_system.HistoricalEventStore(
+            validation=self._history_validation
+        )
+        self._checkpoint_store = historical_system.CheckpointStore(
+            validation=self._history_validation
+        )
+        self._reconstruction = historical_system.ReconstructionEngine(
+            self._event_store, self._checkpoint_store
+        )
+        self._lp_range_engine = historical_system.KuruLpBacktestEngine(
+            MAX_COMPACT_FRAMES
+        )
 
     def load_interval(self, name: str, metrics: dict[str, float] | None = None) -> IntervalData:
         if name in self._intervals:
@@ -481,6 +500,106 @@ class BacktestService:
             )
             self._intervals[name] = data
             return data
+
+    def load_range(
+        self,
+        market: str,
+        from_block: int,
+        to_block: int,
+        metrics: dict[str, float] | None = None,
+    ) -> IntervalData:
+        """Load one arbitrary, continuously indexed range from local files."""
+        if from_block > to_block:
+            raise BacktestInputError("from_block must not exceed to_block")
+        try:
+            self._event_store.require_coverage(market, from_block, to_block)
+            reconstructed = self._reconstruction.reconstruct_start(market, from_block)
+            cursor = historical_system.ReplayCursor(
+                self._event_store, market, from_block, to_block
+            )
+            timestamps = cursor.timestamps()
+            timestamps[from_block - 1] = reconstructed.state_timestamp
+            event_count = len(cursor)
+        except historical_system.HistoricalRangeError as error:
+            raise BacktestInputError(
+                str(error), code="historical_range_unavailable", details=error.details
+            ) from error
+        if event_count == 0:
+            raise BacktestInputError("the requested local range contains no market events")
+
+        # The range reference is the reconstructed midpoint after all events in
+        # its first block. This is the same rule used by the golden intervals.
+        reference_book = historical_system.deserialize_book(
+            serialize_book(reconstructed.book)
+        )
+        for event in cursor:
+            if event.block_number != from_block:
+                break
+            l3.apply_event(
+                reference_book, event, reconstructed.parameters["price_precision"]
+            )
+        reference_book.check_invariants()
+        best_bid, best_ask = reference_book.best_prices()
+        if best_bid is None or best_ask is None:
+            raise BacktestInputError(
+                "the reconstructed book at the requested first block has an empty side"
+            )
+        start_market = {
+            "reference_price_raw": (best_bid + best_ask) // 2,
+            "best_bid_price_raw": best_bid,
+            "best_ask_price_raw": best_ask,
+        }
+        partition_identity = self._event_store.content_identity(from_block, to_block)
+        selected_partitions = self._event_store.selected_partitions(from_block, to_block)
+        golden_fixture = None
+        if (
+            len(selected_partitions) == 1
+            and selected_partitions[0].from_block == from_block
+            and selected_partitions[0].to_block == to_block
+        ):
+            golden_fixture = selected_partitions[0].golden_fixture
+        event_identity = sha256_value({
+            "market": market.lower(),
+            "from_block": from_block,
+            "to_block": to_block,
+            "partitions": partition_identity,
+        })
+        validation_identity = sha256_value([
+            item["validation_summary_sha256"] for item in partition_identity
+        ])
+        if metrics is not None:
+            metrics["indexed_event_count"] = float(event_count)
+            metrics["checkpoint_replay_event_count"] = float(
+                reconstructed.applied_event_count
+            )
+        return IntervalData(
+            name=f"blocks_{from_block}_{to_block}",
+            validation={
+                "interval": {
+                    "market": market.lower(),
+                    "from_block": from_block,
+                    "to_block": to_block,
+                },
+                "event_source": "local_validated_historical_index",
+                "event_parity": {
+                    "status": "pass",
+                    "rpc_event_count": event_count,
+                },
+            },
+            book=reconstructed.book,
+            events=cursor,
+            timestamps=timestamps,
+            parameters=reconstructed.parameters,
+            checkpoint_timestamp=reconstructed.state_timestamp,
+            source_sha256=validation_identity,
+            event_file_sha256=event_identity,
+            checkpoint_sha256=reconstructed.checkpoint.sha256,
+            start_market=start_market,
+            generalized_range=True,
+            checkpoint_block=reconstructed.checkpoint.block_number,
+            golden_fixture=golden_fixture,
+            reconstructed_start=reconstructed,
+        )
 
     def _start_market_from_source(
         self,
@@ -558,7 +677,32 @@ class BacktestService:
                 "tick_size": parameters["tick_size"],
                 "min_size": parameters["min_size"],
             })
-        return {"market": MARKET_ADDRESS, "engine_version": ENGINE_VERSION, "intervals": output}
+        return {
+            "market": MARKET_ADDRESS,
+            "engine_version": ENGINE_VERSION,
+            "intervals": output,
+            "validated_l3_coverage": self._event_store.coverage(),
+            "trade_chart_coverage": self._event_store.manifest.get("trade_chart_coverage"),
+        }
+
+    def range_metadata(
+        self, market: str, from_block: int, to_block: int
+    ) -> dict[str, Any]:
+        """Return local reconstruction data needed to configure one range."""
+        data = self.load_range(market, from_block, to_block)
+        start = data.start_market or {}
+        return {
+            "market": market.lower(),
+            "from_block": from_block,
+            "to_block": to_block,
+            "event_count": len(data.events),
+            "checkpoint_block": data.checkpoint_block,
+            **start,
+            "reference_price": raw_price_text(
+                start["reference_price_raw"], data.parameters["price_precision"]
+            ),
+            **data.parameters,
+        }
 
     def normalize_request(self, request: dict[str, Any], data: IntervalData) -> tuple[dict[str, Any], dict[str, Any]]:
         if str(request.get("engine")) != "kuru_lp":
@@ -570,10 +714,13 @@ class BacktestService:
         if shape not in {"spot", "curve", "bid_ask"}:
             raise BacktestInputError("shape must be spot, curve, or bid_ask")
         params = data.parameters
-        cache = json.loads(checkpoint_cache_path(data.name).read_text(encoding="utf-8"))
-        start_market = self._start_market_from_source(
-            data.name, cache, validation_summary_path(data.name)
-        )
+        if data.start_market is not None:
+            start_market = data.start_market
+        else:
+            cache = json.loads(checkpoint_cache_path(data.name).read_text(encoding="utf-8"))
+            start_market = self._start_market_from_source(
+                data.name, cache, validation_summary_path(data.name)
+            )
         reference_price_raw = start_market["reference_price_raw"]
         submitted_reference = request.get("reference_price_raw")
         if submitted_reference is not None and int(submitted_reference) != reference_price_raw:
@@ -681,6 +828,9 @@ class BacktestService:
             "fixed_action_fee": fixed_action_cost,
             "maker_fee_bps": maker_fee_bps,
         }
+        if data.generalized_range:
+            normalized["from_block"] = int(data.validation["interval"]["from_block"])
+            normalized["to_block"] = int(data.validation["interval"]["to_block"])
         sdk_input = {
             "shape": shape,
             "minimumPrice": minimum_price,
@@ -713,7 +863,23 @@ class BacktestService:
             if progress_callback is not None:
                 progress_callback({"stage": "loading_historical_events", "processed_events": 0, "total_events": 0})
             stage_start = time.perf_counter()
-            data = self.load_interval(interval_name, service_stages)
+            if request.get("from_block") is not None or request.get("to_block") is not None:
+                try:
+                    from_block = int(request["from_block"])
+                    to_block = int(request["to_block"])
+                except (KeyError, TypeError, ValueError) as error:
+                    raise BacktestInputError(
+                        "from_block and to_block must both be integer block numbers"
+                    ) from error
+                data = self.load_range(
+                    str(request.get("market", "")),
+                    from_block,
+                    to_block,
+                    service_stages,
+                )
+                interval_name = data.name
+            else:
+                data = self.load_interval(interval_name, service_stages)
             service_stages["load_historical_events_seconds"] = time.perf_counter() - stage_start
             normalized, sdk_input = self.normalize_request(request, data)
             if progress_callback is not None:
@@ -773,7 +939,13 @@ class BacktestService:
                 "event_file_sha256": data.event_file_sha256,
                 "checkpoint_sha256": data.checkpoint_sha256,
             }
-            run_events = data.events if event_limit is None else data.events[:event_limit]
+            if event_limit is None:
+                run_events = data.events
+            elif data.generalized_range:
+                from itertools import islice
+                run_events = list(islice(data.events, event_limit))
+            else:
+                run_events = data.events[:event_limit]
             if not run_events:
                 raise BacktestInputError("the selected event prefix is empty")
             run_end_block = int(interval["to_block"]) if event_limit is None else run_events[-1].block_number
@@ -811,14 +983,37 @@ class BacktestService:
                     and hashlib.sha256(canonical_bytes(saved_fills)).hexdigest() == complete.get("fills_file_sha256")
                 ):
                     return {**saved, "compact_timeline": saved_timeline}
-            summary, retained_timeline = kuru_lp.run_lp(
-                data.book, run_events, int(interval["from_block"]), run_end_block,
-                config, distribution, data.parameters["price_precision"], data.parameters["size_precision"],
-                data.timestamps, verified, timeline_stride=80,
-                audit_invariants=False,
-                progress_callback=progress_callback,
-                should_cancel=should_cancel,
+            selected_stride = (
+                max(1, (len(run_events) + MAX_COMPACT_FRAMES - 3) // (MAX_COMPACT_FRAMES - 2))
+                if data.generalized_range and data.golden_fixture is None else 80
             )
+            if (
+                data.generalized_range
+                and event_limit is None
+                and data.reconstructed_start is not None
+            ):
+                summary, retained_timeline = self._lp_range_engine.run(
+                    data.reconstructed_start,
+                    run_events,
+                    config,
+                    distribution,
+                    verified,
+                    timeline_stride=selected_stride,
+                    audit_invariants=False,
+                    progress_callback=progress_callback,
+                    should_cancel=should_cancel,
+                )
+            else:
+                summary, retained_timeline = kuru_lp.run_lp(
+                    data.book, run_events, int(interval["from_block"]), run_end_block,
+                    config, distribution, data.parameters["price_precision"], data.parameters["size_precision"],
+                    data.timestamps,
+                    verified,
+                    timeline_stride=selected_stride,
+                    audit_invariants=False,
+                    progress_callback=progress_callback,
+                    should_cancel=should_cancel,
+                )
             summary["normalized_configuration"] = normalized
             summary["initial_position"]["canonical_sdk_grid"] = grid
             summary["initial_position"]["grid_validation"] = grid_validation

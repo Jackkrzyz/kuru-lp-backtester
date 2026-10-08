@@ -6,7 +6,7 @@ The Kuru LP form now runs a new local strategy simulation. It does not load the 
 
 ## Request path
 
-1. `frontend/app.js` reads the selected interval's validated first-block midpoint. It converts the lower and upper range percentages to outward tick-rounded absolute limits. Advanced mode can use direct absolute limits.
+1. `frontend/app.js` submits the selected `from_block` and `to_block`. It gets the local reconstructed first-block midpoint and converts the lower and upper range percentages to outward tick-rounded absolute limits. Advanced mode can use direct absolute limits.
 2. The browser build of the canonical Kuru SDK adapter generates the exact position. It validates every final integer order size against the market `minSize`.
 3. The same grid supplies the preview, required token amounts, validation details, and `order_grid` in `POST /api/backtests`.
 4. `backtest_server.py` creates an isolated job and returns HTTP 202 with a job ID and owner token.
@@ -14,7 +14,7 @@ The Kuru LP form now runs a new local strategy simulation. It does not load the 
 6. `backtest_worker.py` runs `BacktestService.run()` in a separate process.
 7. `backtest_service.py` calculates the reference and tick-rounded limits again and normalizes every submitted field. A private local broker keeps one official SDK `0.0.95` Node.js adapter process warm across isolated jobs. If the broker stops, the worker uses the same adapter in a one-shot process.
 8. The backend rejects a reference-price mismatch, range mismatch, SDK-grid mismatch, or final order below `minSize`. A minimum-size failure has a structured code and order details.
-9. The service loads the selected validated interval event file and checkpoint from local storage. It does not call Envio or RPC during a run. A source-hash-bound SQLite cache stores decoded events in the native temporary file system. The verified JSONL file stays authoritative.
+9. `HistoricalEventStore`, `CheckpointStore`, and `ReconstructionEngine` load the requested covered range from local storage. They reconstruct the state before `from_block`, then `ReplayCursor` streams through `to_block`. The run does not call Envio or RPC. The verified JSONL files stay authoritative.
 10. `kuru_lp.run_lp()` places all initial grid orders in the verified L3 queues. It applies inclusion delay, queue priority, partial fills, transaction participation limits, capital reservations, and repeated flip orders.
 11. The worker compacts replay records directly in memory. It does not write and read a temporary timeline JSONL file. It writes an atomic result, a separate detailed-fill file, and a completion marker. The browser gets the compact result from `GET /api/backtests/{job_id}/result`. An optional client gets detailed fills from `GET /api/backtests/{job_id}/fills`.
 12. The browser replaces all metrics and playback frames with that result.
@@ -28,6 +28,14 @@ python backtest_server.py --host 127.0.0.1 --port 8000
 ```
 
 Open `http://127.0.0.1:8000`.
+
+If the browser runs on Windows and the server runs in WSL, bind the server to all WSL interfaces:
+
+```bash
+python backtest_server.py --host 0.0.0.0 --port 8000
+```
+
+Run `hostname -I` in WSL. Open `http://<first-wsl-address>:8000` in Windows.
 
 ## Integration configurations
 

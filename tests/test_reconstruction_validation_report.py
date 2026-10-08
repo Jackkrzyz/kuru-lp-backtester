@@ -13,6 +13,7 @@ from reconstruction_validation_report import (
     combine_errors,
     compute_level_errors,
     event_parity,
+    load_staged_envio_logs,
     load_named_interval,
     stable_json,
     timeline_record,
@@ -163,6 +164,32 @@ class OutputSchemaTests(unittest.TestCase):
         self.assertEqual(interval["name"], "active")
         self.assertEqual(interval["from_block"], 10)
         self.assertEqual(interval["trade_cache"], "trade.jsonl")
+
+    def test_staged_envio_file_keeps_exact_order_and_timestamps(self) -> None:
+        rows = [
+            {
+                "address": "0xabc", "block_number": 10, "block_timestamp": 100,
+                "transaction_hash": "0x01", "transaction_index": 1,
+                "log_index": 2, "topic0": "0x11", "topic1": None,
+                "topic2": None, "topic3": None, "data": "0x",
+            },
+            {
+                "address": "0xabc", "block_number": 11, "block_timestamp": 101,
+                "transaction_hash": "0x02", "transaction_index": 0,
+                "log_index": 1, "topic0": "0x22", "topic1": None,
+                "topic2": None, "topic3": None, "data": "0x",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            logs, timestamps = load_staged_envio_logs(path, "0xabc", 10, 11)
+
+        self.assertEqual(logs, rows)
+        self.assertEqual(timestamps, {10: 100, 11: 101})
 
 
 if __name__ == "__main__":

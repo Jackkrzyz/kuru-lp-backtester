@@ -17,6 +17,11 @@ const app = {
   mode: "kuru_lp",
   mmCatalog: null,
   intervalMetadata: null,
+  rangeMetadata: null,
+  tradeChart: null,
+  rangeRequestRevision: 0,
+  rangeRequestController: null,
+  rangeRefreshTimer: null,
   marketAddress: null,
   replay: null,
   frameIndex: 0,
@@ -48,6 +53,11 @@ const quantity = (value, digits = 2) => `${Number(value).toFixed(digits)} MON`;
 const price = (value) => (value == null ? "—" : Number(value).toFixed(6));
 const percent = (value) => `${Number(value).toFixed(2)}%`;
 
+function currentMetadata() {
+  if (app.tradeChart) return app.rangeMetadata;
+  return app.intervalMetadata && app.intervalMetadata[$("regime").value];
+}
+
 function signedMoney(value) {
   const numeric = Number(value);
   return `${numeric >= 0 ? "+" : "−"}${Math.abs(numeric).toFixed(4)} USDC`;
@@ -61,8 +71,8 @@ function setSignedMetric(id, value) {
 }
 
 function sdkInput() {
-  const metadata = app.intervalMetadata && app.intervalMetadata[$("regime").value];
-  if (!metadata) throw new Error("The selected interval metadata is not ready.");
+  const metadata = currentMetadata();
+  if (!metadata) throw new Error("The selected block range metadata is not ready.");
   const absoluteMode = $("absolute-range-mode").checked;
   const bounds = absoluteMode
     ? KuruSdkAdapter.absolutePriceBounds($("minimum-price").value, $("maximum-price").value, metadata.tick_size)
@@ -114,7 +124,7 @@ function formatRaw(raw, decimals, digits = 6) {
 }
 
 function formatSizeRaw(raw) {
-  const metadata = app.intervalMetadata && app.intervalMetadata[$("regime").value];
+  const metadata = currentMetadata();
   if (!metadata) return String(raw);
   const value = Number(raw) / Number(metadata.size_precision);
   return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 12 }) : String(raw);
@@ -306,7 +316,7 @@ function clearResult(message = "No run yet", stale = false) {
   if (app.mode === "kuru_lp") {
     const shape = $("liquidity-shape").value.replace("bid_ask", "Bid-Ask").replace(/^./, (value) => value.toUpperCase());
     $("engine-label").textContent = "Kuru LP engine";
-    $("run-title").textContent = `MON / USDC · ${regimeLabels[$("regime").value]}`;
+    $("run-title").textContent = `MON / USDC · blocks ${$("from-block").value}–${$("to-block").value}`;
     $("scenario-badge").textContent = `${shape} · ${scenarioLabels[$("scenario").value]}`;
     $("scenario-badge").classList.toggle("caution", $("scenario").value === "uncapped");
   }
@@ -366,11 +376,17 @@ function buildKuruRequest() {
   if (!app.generatedGrid) throw new Error("The SDK order grid is not valid.");
   if (!app.gridValidation?.deployable) throw new Error("The generated position is not deployable.");
   if (!app.normalizedBounds) throw new Error("The normalized range is not ready.");
+  if (
+    !app.rangeMetadata
+    || Number(app.rangeMetadata.from_block) !== Number($("from-block").value)
+    || Number(app.rangeMetadata.to_block) !== Number($("to-block").value)
+  ) throw new Error("The exact block range has not passed local coverage validation.");
   return {
     engine: "kuru_lp",
     market: app.marketAddress,
     market_symbol: $("market").value,
-    interval: $("regime").value,
+    from_block: Number($("from-block").value),
+    to_block: Number($("to-block").value),
     shape: $("liquidity-shape").value,
     range_mode: app.normalizedBounds.rangeMode,
     lower_range_percent: app.normalizedBounds.lowerRangePercent,
@@ -504,7 +520,10 @@ function updateRunHeader() {
   const replay = app.replay;
   const engine = replay.engine === "kuru_lp" ? "Kuru LP engine" : "Advanced MM Bot engine";
   $("engine-label").textContent = engine;
-  $("run-title").textContent = `MON / USDC · ${regimeLabels[replay.interval]}`;
+  const config = replay.config || {};
+  $("run-title").textContent = config.from_block != null
+    ? `MON / USDC · blocks ${config.from_block}–${config.to_block}`
+    : `MON / USDC · ${regimeLabels[replay.interval] || replay.interval}`;
   const badge = $("scenario-badge");
   const shape = replay.config.shape ? replay.config.shape.replace("bid_ask", "Bid-Ask").replace(/^./, (value) => value.toUpperCase()) : "";
   badge.textContent = `${replay.engine === "kuru_lp" ? `${shape} · ` : ""}${scenarioLabels[$("scenario").value]}`;
@@ -760,15 +779,133 @@ async function setMode(mode) {
   setRunButtonState();
 }
 
+function drawHistoryRangeChart() {
+  if (!app.tradeChart) return;
+  const points = app.tradeChart.points;
+  const canvas = $("history-range-chart");
+  const { context, width, height } = prepareCanvas(canvas);
+  if (!points.length) return;
+  const first = app.tradeChart.trade_only_coverage.from_block;
+  const last = app.tradeChart.trade_only_coverage.to_block;
+  const prices = points.map((item) => Number(item.price));
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const x = (block) => 5 + (Number(block) - first) / Math.max(1, last - first) * (width - 10);
+  const y = (value) => 5 + (high - Number(value)) / Math.max(1e-12, high - low) * (height - 18);
+  context.fillStyle = "rgba(242,176,79,.08)";
+  context.fillRect(0, 0, width, height);
+  app.tradeChart.validated_l3_coverage.forEach((segment) => {
+    context.fillStyle = "rgba(168,208,74,.17)";
+    context.fillRect(x(segment.from_block), 0, Math.max(1, x(segment.to_block) - x(segment.from_block)), height);
+  });
+  context.strokeStyle = "#4fc1b2";
+  context.lineWidth = 1.2;
+  context.beginPath();
+  points.forEach((item, index) => {
+    const px = x(item.block); const py = y(item.price);
+    if (index === 0) context.moveTo(px, py); else context.lineTo(px, py);
+  });
+  context.stroke();
+  const selectedFrom = Number($("from-block").value || first);
+  const selectedTo = Number($("to-block").value || last);
+  context.fillStyle = "rgba(57,120,212,.13)";
+  context.fillRect(x(selectedFrom), 0, Math.max(1, x(selectedTo) - x(selectedFrom)), height);
+}
+
+function setRangeInputs(fromBlock, toBlock) {
+  const scope = app.tradeChart.trade_only_coverage;
+  const start = Math.max(scope.from_block, Math.min(Number(fromBlock), Number(toBlock)));
+  const end = Math.min(scope.to_block, Math.max(Number(fromBlock), Number(toBlock)));
+  $("from-block").value = String(start);
+  $("to-block").value = String(end);
+  // Native range controls can lose unit precision near block 109 million.
+  // Store small offsets in the sliders and keep absolute blocks in number inputs.
+  $("range-start-slider").value = String(start - scope.from_block);
+  $("range-end-slider").value = String(end - scope.from_block);
+  const span = Math.max(1, scope.to_block - scope.from_block);
+  const startPercent = (start - scope.from_block) / span * 100;
+  const endPercent = (end - scope.from_block) / span * 100;
+  $("range-start-slider").parentElement.style.setProperty("--range-start-percent", `${startPercent}%`);
+  $("range-start-slider").parentElement.style.setProperty("--range-end-percent", `${endPercent}%`);
+  drawHistoryRangeChart();
+}
+
+async function refreshRangeMetadata() {
+  const fromBlock = Number($("from-block").value);
+  const toBlock = Number($("to-block").value);
+  const revision = ++app.rangeRequestRevision;
+  app.rangeRequestController?.abort();
+  const controller = new AbortController();
+  app.rangeRequestController = controller;
+  app.rangeMetadata = null;
+  $("range-coverage-status").textContent = "Checking L3 coverage";
+  $("range-coverage-status").className = "";
+  setRunButtonState();
+  const query = new URLSearchParams({
+    market: app.marketAddress,
+    from_block: String(fromBlock),
+    to_block: String(toBlock),
+  });
+  let response;
+  try {
+    response = await fetch(`/api/range-metadata?${query}`, { signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    throw error;
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (
+    revision !== app.rangeRequestRevision
+    || Number($("from-block").value) !== fromBlock
+    || Number($("to-block").value) !== toBlock
+  ) return;
+  if (!response.ok) {
+    const error = payload.error;
+    const message = error && typeof error === "object" ? error.message : error;
+    $("range-coverage-status").textContent = "Not backtestable";
+    $("range-coverage-status").className = "unavailable";
+    $("history-scope-note").textContent = message || "This range has no continuous validated L3 coverage.";
+    app.generatedGrid = null;
+    app.gridValidation = null;
+    setRunButtonState();
+    return;
+  }
+  app.rangeMetadata = payload;
+  $("range-coverage-status").textContent = "Validated L3";
+  $("range-coverage-status").className = "available";
+  $("history-scope-note").textContent = `${Number(payload.event_count).toLocaleString()} local events · checkpoint ${Number(payload.checkpoint_block).toLocaleString()} · no network query`;
+  if (app.mode === "kuru_lp") await renderDistributionPreview();
+}
+
+async function selectGoldenPreset() {
+  const preset = app.intervalMetadata[$("regime").value];
+  setRangeInputs(preset.from_block, preset.to_block);
+  markConfigurationChanged();
+  await refreshRangeMetadata();
+}
+
 async function initialize() {
   try {
-    const [mmResponse, intervalResponse] = await Promise.all([fetch(`${DATA_ROOT}/catalog.json`), fetch("/api/intervals")]);
+    const [mmResponse, intervalResponse, chartResponse] = await Promise.all([
+      fetch(`${DATA_ROOT}/catalog.json`), fetch("/api/intervals"), fetch(`${DATA_ROOT}/trade_history_chart.json`),
+    ]);
     if (!mmResponse.ok) throw new Error("The Advanced MM demo catalog could not be loaded.");
     if (!intervalResponse.ok) throw new Error("The local backtest API could not load interval metadata.");
+    if (!chartResponse.ok) throw new Error("The local Trade history chart could not be loaded.");
     app.mmCatalog = await mmResponse.json();
     const metadata = await intervalResponse.json();
     app.marketAddress = metadata.market;
     app.intervalMetadata = Object.fromEntries(metadata.intervals.map((item) => [item.name, item]));
+    app.tradeChart = await chartResponse.json();
+    const scope = app.tradeChart.trade_only_coverage;
+    [$("range-start-slider"), $("range-end-slider")].forEach((slider) => {
+      slider.min = "0";
+      slider.max = String(scope.to_block - scope.from_block);
+      slider.step = "1";
+    });
+    const initial = app.intervalMetadata[$("regime").value];
+    setRangeInputs(initial.from_block, initial.to_block);
+    await refreshRangeMetadata();
     await setMode("kuru_lp");
   } catch (error) {
     $("status").textContent = error.message;
@@ -813,9 +950,29 @@ $("usdc-amount").addEventListener("input", () => {
   app.amountDriver = "quote"; app.lastEditedToken = "quote"; markConfigurationChanged(); renderDistributionPreview();
 });
 $("regime").addEventListener("change", () => {
-  if (app.mode === "kuru_lp") { markConfigurationChanged(); renderDistributionPreview(); }
+  if (app.mode === "kuru_lp") selectGoldenPreset().catch((error) => clearResult(error.message));
   else loadDemoReplay().catch((error) => clearResult(error.message));
 });
+[$("range-start-slider"), $("range-end-slider")].forEach((slider) => {
+  slider.addEventListener("input", () => {
+    const first = app.tradeChart.trade_only_coverage.from_block;
+    setRangeInputs(
+      first + Number($("range-start-slider").value),
+      first + Number($("range-end-slider").value),
+    );
+    markConfigurationChanged();
+  });
+  slider.addEventListener("change", () => refreshRangeMetadata().catch((error) => clearResult(error.message)));
+});
+[$("from-block"), $("to-block")].forEach((input) => input.addEventListener("input", () => {
+  app.rangeMetadata = null;
+  markConfigurationChanged();
+  clearTimeout(app.rangeRefreshTimer);
+  app.rangeRefreshTimer = setTimeout(() => {
+    setRangeInputs($("from-block").value, $("to-block").value);
+    refreshRangeMetadata().catch((error) => clearResult(error.message));
+  }, 400);
+}));
 $("scenario").addEventListener("change", () => {
   if (app.mode === "kuru_lp") markConfigurationChanged();
   else loadDemoReplay().catch((error) => clearResult(error.message));
@@ -849,6 +1006,10 @@ document.querySelectorAll(".speed-button").forEach((button) => button.addEventLi
   document.querySelectorAll(".speed-button").forEach((item) => item.classList.remove("active"));
   button.classList.add("active");
 }));
-window.addEventListener("resize", () => { renderDistributionPreview({ searchMinimum: false }); if (app.replay) renderFrame(app.frameIndex); });
+window.addEventListener("resize", () => {
+  drawHistoryRangeChart();
+  renderDistributionPreview({ searchMinimum: false });
+  if (app.replay) renderFrame(app.frameIndex);
+});
 
 initialize();

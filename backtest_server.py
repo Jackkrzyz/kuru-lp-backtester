@@ -10,7 +10,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from backtest_service import BacktestInputError, BacktestService
 from backtest_jobs import BacktestJobManager, JobError
@@ -26,6 +26,11 @@ class BacktestHandler(SimpleHTTPRequestHandler):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(FRONTEND), **kwargs)
+
+    def end_headers(self) -> None:
+        """Do not let the local product UI retain stale code or results."""
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def send_json(self, status: int, payload: Any) -> dict[str, Any]:
         encode_start = time.perf_counter()
@@ -46,11 +51,32 @@ class BacktestHandler(SimpleHTTPRequestHandler):
         }
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/intervals":
             try:
                 self.send_json(HTTPStatus.OK, self.service.interval_metadata())
             except Exception as error:  # The API must return a visible error to the UI.
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            return
+        if path == "/api/range-metadata":
+            try:
+                query = parse_qs(parsed.query)
+                market = query.get("market", [""])[0]
+                from_block = int(query.get("from_block", [""])[0])
+                to_block = int(query.get("to_block", [""])[0])
+                self.send_json(
+                    HTTPStatus.OK,
+                    self.service.range_metadata(market, from_block, to_block),
+                )
+            except BacktestInputError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": error.payload()})
+            except (TypeError, ValueError):
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "from_block and to_block must be integer block numbers"},
+                )
+            except Exception as error:
                 self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
             return
         parts = path.strip("/").split("/")

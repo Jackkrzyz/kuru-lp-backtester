@@ -149,6 +149,43 @@ def add_canonical_grid(service: backtest_service.BacktestService, request: dict)
     return complete
 
 
+def add_generalized_grid(
+    service: backtest_service.BacktestService, request: dict
+) -> dict:
+    complete = deepcopy(request)
+    data = service.load_range(
+        complete["market"], complete["from_block"], complete["to_block"]
+    )
+    _, sdk_input = service.normalize_request(complete, data)
+    complete["order_grid"] = backtest_service.canonical_sdk_grid(sdk_input)
+    return complete
+
+
+def test_generalized_block_request_matches_golden_engine_behavior() -> None:
+    service = backtest_service.BacktestService()
+    legacy = request_a()
+    generalized = {
+        **legacy,
+        "from_block": 109097028,
+        "to_block": 109107027,
+    }
+    generalized.pop("interval")
+    legacy_result = service.run(add_canonical_grid(service, legacy), event_limit=100)
+    range_result = service.run(
+        add_generalized_grid(service, generalized), event_limit=100
+    )
+    for key in (
+        "starting_mon", "final_mon", "starting_usdc", "final_usdc", "fills",
+        "turnover", "gross_pnl", "net_pnl", "maximum_drawdown",
+        "earned_flip_spread",
+    ):
+        assert range_result[key] == legacy_result[key]
+    assert range_result["generated_initial_bid_count"] == legacy_result["generated_initial_bid_count"]
+    assert range_result["generated_initial_ask_count"] == legacy_result["generated_initial_ask_count"]
+    assert range_result["normalized_configuration"]["from_block"] == 109097028
+    assert range_result["normalized_configuration"]["to_block"] == 109107027
+
+
 def test_two_different_submitted_configurations_run_the_real_engine() -> None:
     service = backtest_service.BacktestService()
     submitted_a = add_canonical_grid(service, request_a())

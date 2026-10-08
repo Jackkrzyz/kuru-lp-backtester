@@ -1,0 +1,70 @@
+{
+  "all_passed": true,
+  "comparison": "named wrapper versus generalized block-range service",
+  "fixtures": [
+    {
+      "differences": [],
+      "fills": 3,
+      "from_block": 109132028,
+      "generalized": {
+        "run_id": "lp-f7ac394818f9257502b4",
+        "semantic_timeline_sha256": "9160f080ee5596f05ee8498c018cfd7b400960ecb836b6ac79c2803bc3eb2a45",
+        "summary_sha256": "851c15fc60ea3ad6511ee9524750854857c7f45d5b457e24572f04b21a9cf4bb",
+        "timeline_sha256": "ddd1005e10e9f5a95cbd72f4a56a3bd58da2290b513903e6fbb7f05588277c7e"
+      },
+      "golden_fixture": "relatively_quiet",
+      "legacy": {
+        "run_id": "lp-b2848042385b0612e591",
+        "semantic_timeline_sha256": "9160f080ee5596f05ee8498c018cfd7b400960ecb836b6ac79c2803bc3eb2a45",
+        "summary_sha256": "61083e13e35067e400b0e227d193f412b314eb2421b968f5daf737fad60c8a15",
+        "timeline_sha256": "ddd1005e10e9f5a95cbd72f4a56a3bd58da2290b513903e6fbb7f05588277c7e"
+      },
+      "net_pnl": -1.7207856192552258,
+      "status": "pass",
+      "to_block": 109142027
+    },
+    {
+      "differences": [],
+      "fills": 11,
+      "from_block": 109097028,
+      "generalized": {
+        "run_id": "lp-f691772655fa05626d00",
+        "semantic_timeline_sha256": "f17361247d8e84907d86225240681787007b9b89db1f6ae86d66dc24cc155dd2",
+        "summary_sha256": "db208e156d58929d87578288074d403f125875a7104e6f03ec748a54c736c1d0",
+        "timeline_sha256": "9bdedd5012ba9a9c362ee17a70fb6aca87e20a2f9dfeb13165566d27912886a6"
+      },
+      "golden_fixture": "relatively_active",
+      "legacy": {
+        "run_id": "lp-d5034cc3ccb713d44588",
+        "semantic_timeline_sha256": "f17361247d8e84907d86225240681787007b9b89db1f6ae86d66dc24cc155dd2",
+        "summary_sha256": "73cab7226de96ffe33fa3a21e6abc4f0be46ca44ace7247eb26494be1b917ea7",
+        "timeline_sha256": "9bdedd5012ba9a9c362ee17a70fb6aca87e20a2f9dfeb13165566d27912886a6"
+      },
+      "net_pnl": 2.299544797153841,
+      "status": "pass",
+      "to_block": 109107027
+    },
+    {
+      "differences": [],
+      "fills": 15,
+      "from_block": 109117028,
+      "generalized": {
+        "run_id": "lp-2b66ab38e178f0af96a1",
+        "semantic_timeline_sha256": "949372799d8cc773f320b36ecd53fccbaccc932e2333107926e7d894f5822a87",
+        "summary_sha256": "c566bf8738267b01cb18e7ef62a72bf51a0e7c71149a0d0e629ae59725fe6eb3",
+        "timeline_sha256": "2f1d8a2b083d67becba96a0ec960c00d5267436a27723979c5f0aae1614e214c"
+      },
+      "golden_fixture": "directional",
+      "legacy": {
+        "run_id": "lp-10c9b5c1a5c3688645b2",
+        "semantic_timeline_sha256": "949372799d8cc773f320b36ecd53fccbaccc932e2333107926e7d894f5822a87",
+        "summary_sha256": "c907024a973f5401602e37928c680bbcdf9e510bf639c8fe4b4e78bf33f1fcc9",
+        "timeline_sha256": "2f1d8a2b083d67becba96a0ec960c00d5267436a27723979c5f0aae1614e214c"
+      },
+      "net_pnl": -5.047358612795431,
+      "status": "pass",
+      "to_block": 109127027
+    }
+  ],
+  "schema_version": "1.0"
+}

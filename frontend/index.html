@@ -30,13 +30,29 @@
             <input id="market" value="MON / USDC" readonly />
           </label>
           <label>
-            <span>Historical interval</span>
+            <span>Golden range preset</span>
             <select id="regime">
               <option value="relatively_active">Relatively active</option>
               <option value="relatively_quiet">Relatively quiet</option>
               <option value="directional">Directional move</option>
             </select>
           </label>
+          <section class="history-range-card" aria-labelledby="history-range-title">
+            <div class="preview-heading">
+              <strong id="history-range-title">Local Trade history</strong>
+              <span id="range-coverage-status">Loading</span>
+            </div>
+            <canvas id="history-range-chart" height="105" aria-label="Trade price history and validated L3 coverage"></canvas>
+            <div class="range-sliders">
+              <input id="range-start-slider" type="range" aria-label="Start block selector" />
+              <input id="range-end-slider" type="range" aria-label="End block selector" />
+            </div>
+            <div class="field-grid range-block-fields">
+              <label><span>From block</span><input id="from-block" type="number" step="1" /></label>
+              <label><span>To block</span><input id="to-block" type="number" step="1" /></label>
+            </div>
+            <p id="history-scope-note" class="simulator-note">Trade-only chart regions are not backtestable without validated L3 coverage.</p>
+          </section>
           <div id="lp-controls">
             <label><span>Liquidity shape</span><select id="liquidity-shape"><option value="spot">Spot</option><option value="curve">Curve</option><option value="bid_ask">Bid-Ask</option></select></label>
             <div class="field-grid">
@@ -201,6 +217,6 @@
     </div>
     <script src="kuru_sdk_adapter.js" defer></script>
     <script src="request_gate.js" defer></script>
-    <script src="app.js" defer></script>
+    <script src="app.js?v=historical-range-3" defer></script>
   </body>
 </html>

@@ -472,6 +472,64 @@ def load_cached_envio_logs(
     return logs, timestamps
 
 
+def load_staged_envio_logs(
+    path: Path,
+    market: str,
+    first_block: int,
+    last_block: int,
+) -> tuple[list[dict[str, Any]], dict[int, int]]:
+    """Load one canonical event file made by index_history.py."""
+    if not path.is_file():
+        raise ReconstructionError(f"Staged Envio event file is missing: {path}")
+    expected_market = market.lower()
+    logs: list[dict[str, Any]] = []
+    timestamps: dict[int, int] = {}
+    identities: set[tuple[int, str, int]] = set()
+    prior_position: tuple[int, int, int] | None = None
+    with path.open(encoding="utf-8") as source:
+        for line_number, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+                block = int(row["block_number"])
+                transaction_index = int(row["transaction_index"])
+                log_index = int(row["log_index"])
+                transaction_hash = str(row["transaction_hash"]).lower()
+                timestamp = int(row["block_timestamp"])
+                address = str(row["address"]).lower()
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ReconstructionError(
+                    f"Malformed staged Envio row {path}:{line_number}: {error}"
+                ) from error
+            if not first_block <= block <= last_block:
+                raise ReconstructionError(
+                    f"Staged Envio row {path}:{line_number} is outside the requested range"
+                )
+            if address != expected_market:
+                raise ReconstructionError(
+                    f"Staged Envio row {path}:{line_number} has a foreign address"
+                )
+            identity = (block, transaction_hash, log_index)
+            if identity in identities:
+                raise ReconstructionError(f"Duplicate staged Envio event {identity}")
+            identities.add(identity)
+            position = (block, transaction_index, log_index)
+            if prior_position is not None and position <= prior_position:
+                raise ReconstructionError(
+                    f"Staged Envio events are not strictly ordered at {path}:{line_number}"
+                )
+            prior_position = position
+            prior_timestamp = timestamps.get(block)
+            if prior_timestamp is not None and prior_timestamp != timestamp:
+                raise ReconstructionError(
+                    f"Conflicting staged timestamps for block {block}"
+                )
+            timestamps[block] = timestamp
+            logs.append(row)
+    return logs, timestamps
+
+
 def is_worse_trade(
     event: ReplayEvent, simulated_order: SimulatedOrderState, price_precision: int
 ) -> bool:
@@ -1126,6 +1184,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--market", default=MARKET_ADDRESS)
     parser.add_argument("--rpc-url", default=DEFAULT_RPC_URL)
     parser.add_argument("--hypersync-url", default=DEFAULT_HYPERSYNC_URL)
+    parser.add_argument(
+        "--envio-events",
+        type=Path,
+        help="Canonical local events.jsonl made by index_history.py.",
+    )
     parser.add_argument("--output-dir", type=Path)
     return parser.parse_args()
 
@@ -1165,7 +1228,15 @@ def main() -> int:
     hypersync_logs: list[dict[str, Any]] | None = None
     source_timestamps: dict[int, int] = {}
     event_source = "rpc_fallback"
-    if interval_metadata is not None:
+    if args.envio_events is not None:
+        hypersync_logs, source_timestamps = load_staged_envio_logs(
+            args.envio_events,
+            args.market,
+            args.from_block,
+            args.to_block,
+        )
+        event_source = "envio_hypersync_staged_verified_by_rpc"
+    elif interval_metadata is not None:
         hypersync_logs, source_timestamps = load_cached_envio_logs(
             args.interval_manifest,
             interval_metadata,
@@ -1202,10 +1273,19 @@ def main() -> int:
         validation_point_count=args.validation_points,
         event_source=event_source,
         event_input={
-            "path": "source_events.jsonl",
+            "path": (
+                str(args.envio_events.resolve())
+                if args.envio_events is not None
+                else "source_events.jsonl"
+            ),
             "record_count": len(source_logs),
             "ordering": "block_number,transaction_index,log_index",
             "payload_source": event_source,
+            "source_sha256": (
+                hashlib.sha256(args.envio_events.read_bytes()).hexdigest()
+                if args.envio_events is not None
+                else None
+            ),
         },
     )
     paths = write_outputs(output_dir, summary, timeline, plot_data, source_logs)

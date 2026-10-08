@@ -54,6 +54,21 @@ The validation input records this rule. Strategy decisions can use only the book
 
 ## Main product request path
 
+### `historical_system.py`
+
+This module removes the named-regime requirement from the product engine.
+
+| Symbol | Responsibility |
+|---|---|
+| `HistoricalEventStore` | Verify and stream canonical local partitions by market and block range. |
+| `CheckpointStore` | Find the latest verified L3 checkpoint at or before the requested state block. |
+| `ReconstructionEngine` | Replay local events from the checkpoint to the state before `from_block`. |
+| `ReplayCursor` | Provide a repeatable chronological stream through `to_block`. |
+| `KuruLpBacktestEngine` | Pass the local cursor to the unchanged verified LP engine with bounded replay sampling. |
+| `ValidationLayer` | Enforce saved parity, L2, queue, checkpoint, and content-hash gates. |
+
+`historical_index_manifest.json` records complete L3 partitions and checkpoints. The Trade chart scope is separate and does not make a block range backtestable.
+
 ### `backtest_server.py`
 
 This is the local HTTP entry point.
@@ -91,8 +106,10 @@ This module joins the API, validated local inputs, official SDK adapter, LP engi
 | `prepare_interval_cache()` | Make a one-time RPC checkpoint cache before interactive use. |
 | `canonical_sdk_grid()` | Use the warm official SDK broker, or run the same installed adapter in a one-shot Node.js process as a fallback. |
 | `normalize_grid()` | Convert SDK values to a stable JSON form for equality and hashing. |
-| `BacktestService.load_interval()` | Verify local validation metadata, load the checkpoint, and load a hash-bound decoded-event cache or rebuild it from the JSONL source. |
+| `BacktestService.load_interval()` | Compatibility wrapper for the three named golden fixtures. |
+| `BacktestService.load_range()` | Build an arbitrary covered local block range from the generalized stores. |
 | `BacktestService.interval_metadata()` | Replay only the first block from the local validated event prefix and return its midpoint, best prices, and market parameters. |
+| `BacktestService.range_metadata()` | Return first-block price and market data for a submitted local block range. |
 | `BacktestService.normalize_request()` | Validate every user field and make the SDK input. |
 | `BacktestService.run()` | Verify the submitted grid, run LP replay, compact output, hash the result, and save small cache artifacts. |
 
@@ -157,7 +174,7 @@ This file owns the consumer interface and canvas replay.
 |---|---|
 | `sdkInput()`, `generateDistribution()` | Convert relative or absolute range controls and build the exact SDK input and preview grid. |
 | `renderDistributionPreview()`, `renderAmountStatus()` | Draw ascending price levels, mark invalid bars, and show amount and minimum-size checks. |
-| `buildKuruRequest()` | Send the visible configuration and serialized preview grid to the API. |
+| `buildKuruRequest()` | Send market, first block, last block, visible LP configuration, and the serialized preview grid to the API. |
 | `runKuruBacktest()` | Clear old state, create a job, poll progress, get the result, and surface errors. |
 | `applyKuruResponse()` | Replace all metrics and replay frames with one returned run. |
 | `clearResult()`, `markConfigurationChanged()` | Prevent an old result from appearing under edited settings. |
@@ -174,6 +191,7 @@ Current frontend behavior:
 - Compaction keeps each financial change in a frame, but the UI displays the final state of that frame.
 - The token amount driver depends on the last edited token. It is included in the request as `amount_driver`.
 - Inclusion latency, maker fee, fixed action cost, and impact threshold use fixed values in the current Kuru LP form. The participation cap is the editable advanced setting.
+- The range chart uses Trade data only. It shows complete validated L3 coverage separately. Current validated coverage is continuous from block 109092028 through block 109142027. The UI disables a range outside local validated coverage.
 
 ### `frontend/index.html` and `frontend/styles.css`
 
