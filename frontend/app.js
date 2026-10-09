@@ -6,16 +6,9 @@ const regimeLabels = {
   relatively_quiet: "Relatively quiet",
   directional: "Directional move",
 };
-const scenarioLabels = {
-  uncapped: "Uncapped",
-  max_25_percent: "25% participation cap",
-  max_10_percent: "10% participation cap",
-  max_5_percent: "5% participation cap",
-};
 
 const app = {
   mode: "kuru_lp",
-  mmCatalog: null,
   intervalMetadata: null,
   rangeMetadata: null,
   tradeChart: null,
@@ -35,8 +28,8 @@ const app = {
   minimumViablePosition: null,
   normalizedBounds: null,
   running: false,
-  amountDriver: "both",
-  lastEditedToken: "quote",
+  amountDriver: "base",
+  lastEditedToken: "base",
   previewRevision: 0,
   requestGate: RunRequestGate.create(),
   orderState: new Map(),
@@ -225,14 +218,14 @@ async function renderDistributionPreview({ searchMinimum = true } = {}) {
     const bidCount = rows.filter((item) => item.side === "buy").length;
     const askCount = rows.length - bidCount;
     $("preview-count").textContent = `${bidCount} bids · ${askCount} asks`;
-    $("preview-detail").textContent = `SDK ${distribution.source.version} · ${distribution.feePercent}% · bar height is quote notional · green marker is first-block midpoint${validation.invalidOrderCount ? " · amber bars are below minSize" : ""}`;
+    $("preview-detail").textContent = `SDK ${distribution.source.version} · ${distribution.feePercent}% · bar height is quote notional · green marker is the pre-interval midpoint${validation.invalidOrderCount ? " · amber bars are below minSize" : ""}`;
     $("preview-detail").classList.toggle("warning", validation.invalidOrderCount > 0);
     const shortages = renderAmountStatus(distribution);
     renderGridValidation(validation, shortages);
     if (searchMinimum) {
       $("minimum-viable-position").textContent = "Calculating minimum viable position…";
       $("use-minimum-amounts").disabled = true;
-      const minimum = await KuruSdkAdapter.findMinimumViablePosition(input, app.lastEditedToken);
+      const minimum = await KuruSdkAdapter.findMinimumViablePosition(input, "base");
       if (revision !== app.previewRevision) return;
       app.minimumViablePosition = minimum;
       $("minimum-viable-position").textContent = `Minimum viable MON ${formatRaw(minimum.minimumMonAmountRaw, 18, 12)} · Corresponding USDC ${formatRaw(minimum.minimumUsdcAmountRaw, 6, 6)}`;
@@ -254,42 +247,6 @@ async function renderDistributionPreview({ searchMinimum = true } = {}) {
   }
 }
 
-function mmArtifact(interval, scenario) {
-  return app.mmCatalog.artifacts.find((item) => item.interval === interval && item.scenario === scenario);
-}
-
-async function fetchReplay(path) {
-  if (!app.cache.has(path)) {
-    const response = await fetch(`${DATA_ROOT}/${path}`);
-    if (!response.ok) throw new Error(`Replay request failed with HTTP ${response.status}.`);
-    app.cache.set(path, await response.json());
-  }
-  return app.cache.get(path);
-}
-
-function updateMMConfig(config) {
-  $("starting-cash").value = `${config.starting_cash} USDC`;
-  $("starting-inventory").value = `${config.starting_inventory} MON`;
-  $("bid-offset").value = `${config.bid_offset_bps} bps`;
-  $("ask-offset").value = `${config.ask_offset_bps} bps`;
-  $("order-size").value = `${config.order_size} MON`;
-  $("minimum-inventory").value = `${config.minimum_inventory} MON`;
-  $("maximum-inventory").value = `${config.maximum_inventory} MON`;
-  $("maker-fee").value = `${config.maker_fee_bps} bps`;
-  $("cancel-replace").value = config.cancel_replace ? "Enabled" : "Disabled";
-  $("inclusion-latency").value = `${config.inclusion_delay_blocks} block`;
-  $("action-fee").value = `${config.fixed_action_fee} USDC`;
-  $("impact-threshold").value = `${config.material_impact_threshold_percent}%`;
-}
-
-function participationPercent() {
-  return {
-    uncapped: null,
-    max_25_percent: 25,
-    max_10_percent: 10,
-    max_5_percent: 5,
-  }[$("scenario").value];
-}
 
 function clearResult(message = "No run yet", stale = false) {
   stopPlayback();
@@ -317,8 +274,8 @@ function clearResult(message = "No run yet", stale = false) {
     const shape = $("liquidity-shape").value.replace("bid_ask", "Bid-Ask").replace(/^./, (value) => value.toUpperCase());
     $("engine-label").textContent = "Kuru LP engine";
     $("run-title").textContent = `MON / USDC · blocks ${$("from-block").value}–${$("to-block").value}`;
-    $("scenario-badge").textContent = `${shape} · ${scenarioLabels[$("scenario").value]}`;
-    $("scenario-badge").classList.toggle("caution", $("scenario").value === "uncapped");
+    $("scenario-badge").textContent = `${shape} · Kuru LP`;
+    $("scenario-badge").classList.remove("caution");
   }
   ["price-chart", "equity-chart"].forEach((id) => {
     const canvas = $(id);
@@ -349,13 +306,16 @@ async function cancelCurrentJob() {
   app.requestController?.abort();
   app.requestController = null;
   await fetch(`/api/backtests/${job.runId}`, { method: "DELETE", headers: jobHeaders(job) }).catch(() => {});
-  $("cancel-backtest").hidden = true;
+  if (!app.currentJob) $("cancel-backtest").hidden = true;
 }
 
 async function pollBacktestJob(job, token) {
   while (app.currentJob === job && app.requestGate.accepts(token)) {
     const response = await fetch(`/api/backtests/${job.runId}`, { headers: jobHeaders(job) });
     const status = await response.json().catch(() => ({}));
+    if (app.currentJob !== job || !app.requestGate.accepts(token)) {
+      throw new Error("Backtest request was superseded.");
+    }
     if (!response.ok) throw new Error(status.error || `Job status failed with HTTP ${response.status}.`);
     const processed = Number(status.processed_events || 0).toLocaleString();
     const total = status.total_events == null ? "?" : Number(status.total_events).toLocaleString();
@@ -399,11 +359,6 @@ function buildKuruRequest() {
     mon_amount: $("mon-amount").value,
     usdc_amount: $("usdc-amount").value,
     amount_driver: app.amountDriver,
-    inclusion_delay_blocks: 1,
-    max_transaction_participation_percent: participationPercent(),
-    maker_fee_bps: 0,
-    fixed_action_fee: 0,
-    material_impact_threshold_percent: 25,
     order_grid: KuruSdkAdapter.serializeOrderGrid(app.generatedGrid),
   };
 }
@@ -445,6 +400,7 @@ async function runKuruBacktest() {
   setRunButtonState();
   try {
     await renderDistributionPreview();
+    if (!app.requestGate.accepts(token)) return;
     const request = buildKuruRequest();
     const requestStarted = performance.now();
     const response = await fetch("/api/backtests", {
@@ -458,6 +414,12 @@ async function runKuruBacktest() {
       throw new Error(message || `Backtest request failed with HTTP ${response.status}.`);
     }
     const job = { runId: payload.run_id, ownerToken: payload.owner_token };
+    if (!app.requestGate.accepts(token)) {
+      // Cancel only the stale request's returned job. Never overwrite or
+      // cancel a newer job which is already attached to the form.
+      await fetch(`/api/backtests/${job.runId}`, { method: "DELETE", headers: jobHeaders(job) }).catch(() => {});
+      return;
+    }
     app.currentJob = job;
     $("cancel-backtest").hidden = false;
     await pollBacktestJob(job, token);
@@ -496,42 +458,21 @@ async function runKuruBacktest() {
   }
 }
 
-async function loadDemoReplay() {
-  stopPlayback();
-  $("status").textContent = "Loading labeled demo replay…";
-  const artifact = mmArtifact($("regime").value, $("scenario").value);
-  if (!artifact) throw new Error("The selected deterministic bot demo is not available.");
-  app.replay = await fetchReplay(artifact.path);
-  app.chartCache.clear();
-  updateMMConfig(app.replay.config);
-  app.frameIndex = 0;
-  updateRunHeader();
-  updateResults();
-  $("run-identity").hidden = true;
-  $("result-state").textContent = "Saved demo replay";
-  $("scrubber").max = String(app.replay.frames.length - 1);
-  $("scrubber").value = "0";
-  $("total-frames").textContent = app.replay.frames.length.toLocaleString();
-  renderFrame(0);
-  $("status").textContent = "Demo replay ready";
-}
-
 function updateRunHeader() {
   const replay = app.replay;
-  const engine = replay.engine === "kuru_lp" ? "Kuru LP engine" : "Advanced MM Bot engine";
-  $("engine-label").textContent = engine;
+  $("engine-label").textContent = "Kuru LP engine";
   const config = replay.config || {};
   $("run-title").textContent = config.from_block != null
     ? `MON / USDC · blocks ${config.from_block}–${config.to_block}`
     : `MON / USDC · ${regimeLabels[replay.interval] || replay.interval}`;
   const badge = $("scenario-badge");
   const shape = replay.config.shape ? replay.config.shape.replace("bid_ask", "Bid-Ask").replace(/^./, (value) => value.toUpperCase()) : "";
-  badge.textContent = `${replay.engine === "kuru_lp" ? `${shape} · ` : ""}${scenarioLabels[$("scenario").value]}`;
-  badge.classList.toggle("caution", replay.uncapped);
+  badge.textContent = `${shape} · Kuru LP`;
+  badge.classList.toggle("caution", replay.results.transaction_impact_warning);
   const warning = $("impact-warning");
-  if (replay.uncapped || replay.results.transaction_impact_warning) {
+  if (replay.results.transaction_impact_warning) {
     warning.hidden = false;
-    warning.textContent = `${replay.uncapped ? "Uncapped replay" : "Transaction-impact warning"}. Maximum participation was ${Number(replay.results.maximum_transaction_impact_percent).toFixed(2)}%.`;
+    warning.textContent = `Historical-data limitation: this position filled ${Number(replay.results.maximum_transaction_impact_percent).toFixed(2)}% of a historical transaction. Real trades could change with this added liquidity.`;
   } else {
     warning.hidden = true;
     warning.textContent = "";
@@ -540,27 +481,24 @@ function updateRunHeader() {
 
 function updateResults() {
   const result = app.replay.results;
-  const isLP = app.replay.engine === "kuru_lp";
   setSignedMetric("strategy-pnl", result.strategy_pnl);
   setSignedMetric("hold-pnl", result.hold_pnl);
   setSignedMetric("excess-pnl", result.excess_pnl);
   $("drawdown").textContent = money(result.maximum_drawdown);
   $("turnover").textContent = money(result.turnover, 2);
-  $("inventory-label").textContent = isLP ? "Inventory composition" : "Ending inventory";
-  $("ending-inventory").textContent = isLP
-    ? `${Number(result.ending_mon_percent).toFixed(1)}% MON / ${Number(result.ending_usdc_percent).toFixed(1)}% USDC`
-    : quantity(result.ending_inventory, 2);
+  $("inventory-label").textContent = "Inventory composition";
+  $("ending-inventory").textContent = `${Number(result.ending_mon_percent).toFixed(1)}% MON / ${Number(result.ending_usdc_percent).toFixed(1)}% USDC`;
   $("fill-counts").textContent = `${result.buy_fill_count} / ${result.sell_fill_count}`;
   $("order-actions").textContent = Number(result.total_order_actions).toLocaleString();
-  $("actions-label").textContent = isLP ? "Initial + flip orders" : "Order actions";
-  $("extra-one-label").textContent = isLP ? "Earned flip spread" : "Engine";
-  $("extra-one").textContent = isLP ? money(result.earned_flip_spread, 6) : "Cancel / replace";
-  $("extra-two-label").textContent = isLP ? "Time in range" : "Participation";
-  $("extra-two").textContent = isLP ? percent(result.time_in_range_percent) : scenarioLabels[$("scenario").value];
-  $("extra-three-label").textContent = isLP ? "Capital utilization" : "Mode";
-  $("extra-three").textContent = isLP ? percent(result.capital_utilization_percent) : "Advanced";
-  $("break-even-label").textContent = isLP ? "Required MON / USDC ratio" : "Break-even action cost";
-  $("break-even-cost").textContent = isLP ? `${Number(result.required_mon_usdc_ratio).toFixed(4)} MON per USDC` : money(result.break_even_action_cost, 6);
+  $("actions-label").textContent = "Initial + flip orders";
+  $("extra-one-label").textContent = "Earned flip spread";
+  $("extra-one").textContent = money(result.earned_flip_spread, 6);
+  $("extra-two-label").textContent = "Time in range";
+  $("extra-two").textContent = percent(result.time_in_range_percent);
+  $("extra-three-label").textContent = "Capital utilization";
+  $("extra-three").textContent = percent(result.capital_utilization_percent);
+  $("break-even-label").textContent = "Required MON / USDC ratio";
+  $("break-even-cost").textContent = `${Number(result.required_mon_usdc_ratio).toFixed(4)} MON per USDC`;
   $("result-state").textContent = result.transaction_impact_warning ? "Impact warning" : "Impact check passed";
 }
 
@@ -760,22 +698,10 @@ async function setMode(mode) {
   app.mode = mode;
   document.querySelectorAll(".mode-button").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
   $("lp-controls").hidden = mode !== "kuru_lp";
-  $("mm-controls").hidden = mode !== "advanced_mm_bot";
-  $("form-help").textContent = mode === "kuru_lp"
-    ? "Run a new local Kuru LP simulation with this exact SDK-generated position."
-    : "This is an explicitly labeled saved demo of the preserved cancel/replace market-making engine.";
-  if (mode === "kuru_lp") {
+  $("form-help").textContent = "Run a local Kuru LP simulation with this exact SDK-generated position.";
     $("regime").disabled = false;
     await renderDistributionPreview();
     clearResult("No Kuru LP run yet");
-  } else {
-    $("regime").disabled = false;
-    try { await loadDemoReplay(); } catch (error) {
-      clearResult(error.message);
-      $("impact-warning").hidden = false;
-      $("impact-warning").textContent = error.message;
-    }
-  }
   setRunButtonState();
 }
 
@@ -794,7 +720,9 @@ function drawHistoryRangeChart() {
   const y = (value) => 5 + (high - Number(value)) / Math.max(1e-12, high - low) * (height - 18);
   context.fillStyle = "rgba(242,176,79,.08)";
   context.fillRect(0, 0, width, height);
-  app.tradeChart.validated_l3_coverage.forEach((segment) => {
+  // Coverage can expand after this chart file was built. Use the backend's
+  // verified manifest, not stale coverage embedded in a Trade-only artifact.
+  (app.intervalMetadata?.validated_l3_coverage || []).forEach((segment) => {
     context.fillStyle = "rgba(168,208,74,.17)";
     context.fillRect(x(segment.from_block), 0, Math.max(1, x(segment.to_block) - x(segment.from_block)), height);
   });
@@ -886,13 +814,11 @@ async function selectGoldenPreset() {
 
 async function initialize() {
   try {
-    const [mmResponse, intervalResponse, chartResponse] = await Promise.all([
-      fetch(`${DATA_ROOT}/catalog.json`), fetch("/api/intervals"), fetch(`${DATA_ROOT}/trade_history_chart.json`),
+    const [intervalResponse, chartResponse] = await Promise.all([
+      fetch("/api/intervals"), fetch(`${DATA_ROOT}/trade_history_chart.json`),
     ]);
-    if (!mmResponse.ok) throw new Error("The Advanced MM demo catalog could not be loaded.");
     if (!intervalResponse.ok) throw new Error("The local backtest API could not load interval metadata.");
     if (!chartResponse.ok) throw new Error("The local Trade history chart could not be loaded.");
-    app.mmCatalog = await mmResponse.json();
     const metadata = await intervalResponse.json();
     app.marketAddress = metadata.market;
     app.intervalMetadata = Object.fromEntries(metadata.intervals.map((item) => [item.name, item]));
@@ -916,15 +842,7 @@ async function initialize() {
 
 $("backtest-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (app.mode === "kuru_lp") {
-    await runKuruBacktest();
-  } else {
-    try { await loadDemoReplay(); } catch (error) {
-      clearResult(error.message);
-      $("impact-warning").hidden = false;
-      $("impact-warning").textContent = error.message;
-    }
-  }
+  await runKuruBacktest();
 });
 $("cancel-backtest").addEventListener("click", async () => {
   await cancelCurrentJob();
@@ -950,8 +868,7 @@ $("usdc-amount").addEventListener("input", () => {
   app.amountDriver = "quote"; app.lastEditedToken = "quote"; markConfigurationChanged(); renderDistributionPreview();
 });
 $("regime").addEventListener("change", () => {
-  if (app.mode === "kuru_lp") selectGoldenPreset().catch((error) => clearResult(error.message));
-  else loadDemoReplay().catch((error) => clearResult(error.message));
+  selectGoldenPreset().catch((error) => clearResult(error.message));
 });
 [$("range-start-slider"), $("range-end-slider")].forEach((slider) => {
   slider.addEventListener("input", () => {
@@ -973,19 +890,26 @@ $("regime").addEventListener("change", () => {
     refreshRangeMetadata().catch((error) => clearResult(error.message));
   }, 400);
 }));
-$("scenario").addEventListener("change", () => {
-  if (app.mode === "kuru_lp") markConfigurationChanged();
-  else loadDemoReplay().catch((error) => clearResult(error.message));
-});
 $("auto-fill-amounts").addEventListener("click", async () => {
   markConfigurationChanged();
+  const configurationRevision = app.requestGate.snapshot().revision;
   app.amountDriver = app.lastEditedToken;
   await renderDistributionPreview();
+  if (configurationRevision !== app.requestGate.snapshot().revision) return;
   if (!app.generatedGrid) return;
   if (app.amountDriver === "base") {
     $("usdc-amount").value = KuruSdkAdapter.rawToDecimal(app.generatedGrid.requiredUsdcRaw, 6);
   } else {
-    $("mon-amount").value = KuruSdkAdapter.rawToDecimal(app.generatedGrid.requiredMonRaw, 18);
+    try {
+      const balanced = await KuruSdkAdapter.balanceQuoteDeposit(sdkInput());
+      if (configurationRevision !== app.requestGate.snapshot().revision) return;
+      $("mon-amount").value = KuruSdkAdapter.rawToDecimal(balanced.monAmountRaw, 18);
+      app.amountDriver = "base";
+    } catch (error) {
+      if (configurationRevision !== app.requestGate.snapshot().revision) return;
+      clearResult(error.message);
+      return;
+    }
   }
   await renderDistributionPreview();
 });

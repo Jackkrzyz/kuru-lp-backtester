@@ -39,7 +39,7 @@ def test_percentage_range_uses_outward_tick_rounding() -> None:
     assert maximum % 100 == 0
 
 
-def test_interval_reference_is_validated_first_block_midpoint() -> None:
+def test_interval_reference_is_pre_interval_midpoint() -> None:
     metadata = backtest_service.BacktestService().interval_metadata()
     active = next(item for item in metadata["intervals"] if item["name"] == "relatively_active")
     assert active["from_block"] == 109097028
@@ -121,11 +121,6 @@ def request_a() -> dict:
         "mon_amount": "6000",
         "usdc_amount": "180",
         "amount_driver": "both",
-        "inclusion_delay_blocks": 1,
-        "max_transaction_participation_percent": 10,
-        "maker_fee_bps": 0,
-        "fixed_action_fee": 0,
-        "material_impact_threshold_percent": 25,
     }
 
 

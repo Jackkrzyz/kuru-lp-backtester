@@ -176,7 +176,9 @@ def run_index(
             persist_cursor=partition.save,
             on_rate_limit=partition.save,
         )
-        next_block = quantity_int(result.get("next_block", stop))
+        if "next_block" not in result:
+            raise DiscoveryError("HyperSync page has no next_block cursor; page was not committed")
+        next_block = quantity_int(result["next_block"])
         if next_block <= cursor:
             raise DiscoveryError(f"HyperSync cursor did not advance past {cursor}")
         def missing_timestamp(block: int) -> int:
@@ -197,6 +199,9 @@ def run_index(
             market,
             missing_timestamp,
         )
+        page_end = min(next_block, stop)
+        if any(not cursor <= int(row["block_number"]) < page_end for row in rows):
+            raise DiscoveryError("HyperSync page contains a log outside its cursor range; page was not committed")
         added = partition.append(rows)
         cursor = min(next_block, stop)
         partition.state.update({
@@ -220,7 +225,7 @@ def capture_checkpoint(
     """Write one exact L3 checkpoint and return its content hash."""
     rpc = RpcClient(rpc_url, timeout=180)
     book, _, _ = l3.load_checkpoint(rpc, market, block_number)
-    parameters = market_parameters(rpc, market)
+    parameters = market_parameters(rpc, market, block_number)
     timestamp = rpc.block_timestamps([block_number])[block_number]
     payload = {
         "schema_version": "1.0",
@@ -232,8 +237,8 @@ def capture_checkpoint(
             "size_precision": int(parameters["size_precision"]),
             "tick_size": int(parameters["tick_size"]),
             "min_size": int(parameters["min_size"]),
-            "base_decimals": 18,
-            "quote_decimals": 6,
+            "base_decimals": int(parameters["base_decimals"]),
+            "quote_decimals": int(parameters["quote_decimals"]),
         },
         "book": {
             "orders": [asdict(book.orders[key]) for key in sorted(book.orders)],

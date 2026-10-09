@@ -1,0 +1,84 @@
+{
+  "all_passed": true,
+  "comparison": "named wrapper versus generalized block-range service",
+  "configuration": {
+    "amount_driver": "base",
+    "engine": "kuru_lp",
+    "fee_percent": "0.30",
+    "lower_range_percent": "3",
+    "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+    "market_symbol": "MON / USDC",
+    "mon_amount": "6000",
+    "range_mode": "percentage",
+    "shape": "spot",
+    "upper_range_percent": "3",
+    "usdc_amount": "200"
+  },
+  "engine_version": "kuru-lp-contract-v18",
+  "fixtures": [
+    {
+      "differences": [],
+      "fills": 3,
+      "from_block": 109132028,
+      "generalized": {
+        "run_id": "lp-3dcbac7069fbb06a80b8",
+        "semantic_timeline_sha256": "8e3019ee595c2cd2d082c2f9137a806c8c20bdd9350eeb2e2983051bad6e40ba",
+        "summary_sha256": "23a8eac206d15237bb2c0d10f6380dc9ae56fcd73a0490baa05eeee184bbb1b5",
+        "timeline_sha256": "1e97f9671a041ad9a519ba4e1e39d00ebf3e77f79030f5d508164bb6d0c5b4cb"
+      },
+      "golden_fixture": "relatively_quiet",
+      "legacy": {
+        "run_id": "lp-a9ccd7f75e4ff6daa288",
+        "semantic_timeline_sha256": "8e3019ee595c2cd2d082c2f9137a806c8c20bdd9350eeb2e2983051bad6e40ba",
+        "summary_sha256": "907b6c274b266ce30469e55cdf3bed41d060b257cbcbc677e9aeb237454184db",
+        "timeline_sha256": "1e97f9671a041ad9a519ba4e1e39d00ebf3e77f79030f5d508164bb6d0c5b4cb"
+      },
+      "net_pnl": -1.7249738019380478,
+      "status": "pass",
+      "to_block": 109142027
+    },
+    {
+      "differences": [],
+      "fills": 11,
+      "from_block": 109097028,
+      "generalized": {
+        "run_id": "lp-b9c3bae81918c7e45797",
+        "semantic_timeline_sha256": "c23fed876fe4fafccb2fa8c29f5839ad139b54dacf2aaa516697b529ff7b812f",
+        "summary_sha256": "95b7da8505fb5f4a8e1fae9c630933f5ce763f11c8ffdd1aae30bed3a3e04893",
+        "timeline_sha256": "4e9aae508a227b47cb84324663b946ff92a91088a4c89569d8dad164e18837b2"
+      },
+      "golden_fixture": "relatively_active",
+      "legacy": {
+        "run_id": "lp-5973ffac889a445188ab",
+        "semantic_timeline_sha256": "c23fed876fe4fafccb2fa8c29f5839ad139b54dacf2aaa516697b529ff7b812f",
+        "summary_sha256": "ca021e90ca86ce7f9a8bd4edaffd822fa5429ff3ad49c69b37c6571578834007",
+        "timeline_sha256": "4e9aae508a227b47cb84324663b946ff92a91088a4c89569d8dad164e18837b2"
+      },
+      "net_pnl": 2.292635767594539,
+      "status": "pass",
+      "to_block": 109107027
+    },
+    {
+      "differences": [],
+      "fills": 14,
+      "from_block": 109117028,
+      "generalized": {
+        "run_id": "lp-10bf3000c74990119972",
+        "semantic_timeline_sha256": "22a7778f12fda84204270f6c4595be5abea24946c80353e22dc7b34d72007561",
+        "summary_sha256": "dfc7ef63ee3127447b78b469738c915e2d34fc61b05760d5a88ee4ae59a0d94b",
+        "timeline_sha256": "bcefa6f4391ad6350c0807667edeb1b1d6d44498dfb0717fe6c2b8e9605bd35a"
+      },
+      "golden_fixture": "directional",
+      "legacy": {
+        "run_id": "lp-a2c61cfc07544da406e9",
+        "semantic_timeline_sha256": "22a7778f12fda84204270f6c4595be5abea24946c80353e22dc7b34d72007561",
+        "summary_sha256": "e98f67aaece562323720443b439605aec7fdad52fbd60ca5de3fb385bd600961",
+        "timeline_sha256": "bcefa6f4391ad6350c0807667edeb1b1d6d44498dfb0717fe6c2b8e9605bd35a"
+      },
+      "net_pnl": -5.088984279593537,
+      "status": "pass",
+      "to_block": 109127027
+    }
+  ],
+  "schema_version": "1.0"
+}

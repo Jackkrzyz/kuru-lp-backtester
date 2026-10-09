@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = ROOT / "historical_index_manifest.json"
 DEFAULT_OUTPUT = ROOT / "frontend" / "public" / "data" / "trade_history_chart.json"
+
+
+def source_sha256(path: Path) -> str:
+    """Hash large source files without loading them into memory a second time."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def downsample_trades(rows: list[dict[str, Any]], maximum_points: int) -> list[dict[str, Any]]:
@@ -58,10 +68,18 @@ def build_chart(manifest_path: Path, output_path: Path, maximum_points: int) -> 
             item = json.loads(line)
             if item.get("name") != "Trade" or item.get("trade_price") is None:
                 continue
+            block = int(item["block_number"])
+            if not int(scope["from_block"]) <= block <= int(scope["to_block"]):
+                raise ValueError("Trade chart event is outside its declared coverage")
+            if item.get("address") is not None and str(item["address"]).lower() != str(manifest["market"]).lower():
+                raise ValueError("Trade chart event belongs to another market")
+            price = float(item["trade_price"])
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError("Trade chart price must be finite and positive")
             rows.append({
-                "block": int(item["block_number"]),
+                "block": block,
                 "timestamp": int(item["block_timestamp"]),
-                "price": float(item["trade_price"]),
+                "price": price,
                 "volume_raw": str(item.get("trade_size", 0)),
                 "ordinal": ordinal,
             })
@@ -69,7 +87,7 @@ def build_chart(manifest_path: Path, output_path: Path, maximum_points: int) -> 
     points = downsample_trades(rows, maximum_points)
     for item in points:
         item.pop("ordinal", None)
-    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    source_hash = source_sha256(source)
     payload = {
         "schema_version": "1.0",
         "market": manifest["market"],

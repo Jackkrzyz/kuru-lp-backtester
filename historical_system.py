@@ -77,29 +77,33 @@ class ValidationLayer:
     """Verify saved parity reports and every local content hash."""
 
     def __init__(self) -> None:
-        self._verified_files: set[tuple[Path, str]] = set()
+        self._verified_files: dict[tuple[Path, str], tuple[int, int, int, int]] = {}
 
     def verify_file(self, path: Path, expected_sha256: str) -> None:
         key = (path, expected_sha256)
-        if key in self._verified_files:
-            return
         if not path.is_file():
             raise HistoricalRangeError(f"indexed file is missing: {path}")
+        stat = path.stat()
+        signature = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino)
+        if self._verified_files.get(key) == signature:
+            return
         actual = sha256_file(path)
         if actual != expected_sha256:
             raise HistoricalRangeError(
                 f"indexed file hash does not match: {path}",
                 details={"expected_sha256": expected_sha256, "actual_sha256": actual},
             )
-        self._verified_files.add(key)
+        self._verified_files[key] = signature
 
-    def verify_partition(self, partition: EventPartition) -> dict[str, Any]:
+    def verify_partition(self, partition: EventPartition, market: str | None = None) -> dict[str, Any]:
         self.verify_file(partition.path, partition.sha256)
         self.verify_file(
             partition.validation_summary, partition.validation_summary_sha256
         )
         summary = strategy.verify_validation_summary(partition.validation_summary)
         interval = summary["interval"]
+        if market is not None and str(summary.get("market", interval.get("market", ""))).lower() != market.lower():
+            raise HistoricalRangeError("validation market does not match the indexed market")
         if (
             int(interval["from_block"]) != partition.from_block
             or int(interval["to_block"]) != partition.to_block
@@ -138,6 +142,7 @@ class HistoricalEventStore:
             key=lambda item: item.from_block,
         ))
         self._range_counts: dict[tuple[int, int], int] = {}
+        self._range_timestamps: dict[tuple[int, int], dict[int, int]] = {}
         self._validate_manifest_ranges()
 
     def _path(self, value: str) -> Path:
@@ -213,7 +218,7 @@ class HistoricalEventStore:
         self.require_coverage(market, from_block, to_block)
         prior_position: tuple[int, int, int] | None = None
         for partition in self.selected_partitions(from_block, to_block):
-            self.validation.verify_partition(partition)
+            self.validation.verify_partition(partition, self.market)
             with partition.path.open("r", encoding="utf-8") as source:
                 for line_number, line in enumerate(source, start=1):
                     if not line.strip():
@@ -239,17 +244,20 @@ class HistoricalEventStore:
 
     def event_count(self, market: str, from_block: int, to_block: int) -> int:
         key = (from_block, to_block)
-        if key not in self._range_counts:
-            self._range_counts[key] = sum(
-                1 for _ in self.iter_events(market, from_block, to_block)
-            )
+        self.timestamps(market, from_block, to_block)
         return self._range_counts[key]
 
     def timestamps(self, market: str, from_block: int, to_block: int) -> dict[int, int]:
         self.require_coverage(market, from_block, to_block)
+        key = (from_block, to_block)
+        partitions = self.selected_partitions(from_block, to_block)
+        for partition in partitions:
+            self.validation.verify_partition(partition, self.market)
+        if key in self._range_timestamps:
+            return dict(self._range_timestamps[key])
         output: dict[int, int] = {}
-        for partition in self.selected_partitions(from_block, to_block):
-            self.validation.verify_partition(partition)
+        count = 0
+        for partition in partitions:
             with partition.path.open("r", encoding="utf-8") as source:
                 for line in source:
                     if not line.strip():
@@ -266,7 +274,13 @@ class HistoricalEventStore:
                             f"conflicting timestamps for indexed block {block}"
                         )
                     output[block] = timestamp
-        return output
+                    count += 1
+        if len(self._range_timestamps) >= 128:
+            self._range_timestamps.clear()
+            self._range_counts.clear()
+        self._range_counts[key] = count
+        self._range_timestamps[key] = output
+        return dict(output)
 
     def content_identity(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         return [
@@ -306,6 +320,9 @@ class CheckpointStore:
             ),
             key=lambda item: item.block_number,
         ))
+        for checkpoint in self.checkpoints:
+            if self.project_root not in checkpoint.path.parents:
+                raise HistoricalRangeError("checkpoint path leaves the project root")
 
     def latest_at_or_before(self, market: str, block_number: int) -> StoredCheckpoint:
         if market.lower() != self.market:
@@ -317,7 +334,9 @@ class CheckpointStore:
                 details={"requested_block": block_number},
             )
         checkpoint = matches[-1]
-        self.validation.verify_checkpoint(checkpoint)
+        payload = self.validation.verify_checkpoint(checkpoint)
+        if str(payload.get("market", "")).lower() != self.market:
+            raise HistoricalRangeError("checkpoint market does not match the indexed market")
         return checkpoint
 
 

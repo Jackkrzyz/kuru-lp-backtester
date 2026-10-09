@@ -235,13 +235,13 @@ select:disabled { color: #a8b9b6; cursor: not-allowed; }
 .grid-validation strong { color: #dce9e6; text-align: right; }
 .grid-validation strong.invalid { color: #f2b77d; }
 
-.advanced-settings {
+.price-settings {
   margin: 5px 0 13px;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 9px;
   padding: 0 10px;
 }
-.advanced-settings summary {
+.price-settings summary {
   padding: 11px 0;
   color: #9bb2ae;
   font-size: 10px;
@@ -250,7 +250,7 @@ select:disabled { color: #a8b9b6; cursor: not-allowed; }
   text-transform: uppercase;
   letter-spacing: .06em;
 }
-.advanced-settings[open] summary { margin-bottom: 3px; }
+.price-settings[open] summary { margin-bottom: 3px; }
 
 .run-button {
   display: flex;

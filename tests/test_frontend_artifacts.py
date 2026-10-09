@@ -60,16 +60,12 @@ class FrontendArtifactTests(unittest.TestCase):
         html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
         javascript = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
         for control in (
-            "starting-cash",
-            "starting-inventory",
-            "bid-offset",
-            "ask-offset",
-            "order-size",
-            "minimum-inventory",
-            "maximum-inventory",
-            "scenario",
-            "maker-fee",
-            "action-fee",
+            "market",
+            "from-block",
+            "to-block",
+            "liquidity-shape",
+            "mon-amount",
+            "usdc-amount",
             "play-button",
             "scrubber",
         ):
@@ -105,12 +101,12 @@ class FrontendArtifactTests(unittest.TestCase):
             "invalid-order-count",
             "offending-order",
             "deployable-status",
-            "inclusion-latency",
-            "impact-threshold",
         ):
             self.assertIn(f'id="{control}"', html)
-        self.assertIn('data-mode="kuru_lp"', html)
-        self.assertIn('data-mode="advanced_mm_bot"', html)
+        self.assertNotIn("Advanced MM Demo", html)
+        self.assertNotIn("Advanced simulation", html)
+        self.assertNotIn("catalog.json", javascript)
+        self.assertNotIn("loadDemoReplay", javascript)
         self.assertIn("KuruSdkAdapter.generateOrderGrid", javascript)
         self.assertIn("KuruSdkAdapter.percentagePriceBounds", javascript)
         self.assertIn("KuruSdkAdapter.validateOrderGrid", javascript)

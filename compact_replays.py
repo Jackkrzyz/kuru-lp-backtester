@@ -67,8 +67,9 @@ def compact_activation(action: dict[str, Any]) -> dict[str, Any]:
         "order_id": action["order_id"],
         "side": action["side"],
         "activation_block": action["activation_block"],
-        "queue_ahead_size": action["queue_ahead_size"],
+        "queue_ahead_size": action.get("queue_ahead_size", 0),
         "queue_ahead_order_count": action.get("queue_ahead_order_count", 0),
+        **({"status": action["status"], "reason": action.get("reason")} if "status" in action else {}),
     }
 
 

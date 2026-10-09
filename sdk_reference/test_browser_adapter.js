@@ -52,8 +52,8 @@ async function main() {
       if (index) assert(grid.orders[index - 1].price <= order.price, `${shape} ascending price`);
       assert.equal(
         order.quoteNotionalRaw,
-        order.price * order.liquidity * 10n ** grid.quoteAssetDecimals
-          / (grid.pricePrecision * grid.sizePrecision),
+        (order.price * order.liquidity / grid.sizePrecision) * 10n ** grid.quoteAssetDecimals
+          / grid.pricePrecision,
         `${shape} quote notional ${index}`,
       );
     });
@@ -64,7 +64,9 @@ async function main() {
     );
     assert.equal(
       grid.requiredUsdcRaw,
-      grid.orders.filter((item) => item.side === "buy").reduce((sum, item) => sum + item.quoteNotionalRaw, 0n),
+      grid.orders.filter((item) => item.side === "buy").reduce((sum, item) => sum
+        + (((item.price * item.liquidity + grid.sizePrecision - 1n) / grid.sizePrecision)
+          * 10n ** grid.quoteAssetDecimals + grid.pricePrecision - 1n) / grid.pricePrecision, 0n),
     );
   }
 
@@ -72,6 +74,20 @@ async function main() {
   const baseDriven = await adapter.generateOrderGrid({ ...input, shape: "spot", driver: "base" });
   assert(quoteDriven.requiredMonRaw > 0n);
   assert(baseDriven.requiredUsdcRaw > 0n);
+  for (const shape of ["spot", "curve", "bid_ask"]) {
+    const balanced = await adapter.balanceQuoteDeposit({ ...input, shape });
+    assert(balanced.grid.requiredUsdcRaw <= adapter.decimalToRaw(input.usdcAmount, 6), `${shape} locked USDC funding`);
+    const repeated = await adapter.generateOrderGrid({ ...input, shape, driver: "base",
+      monAmount: adapter.rawToDecimal(balanced.monAmountRaw, 18) });
+    assert.deepEqual(adapter.serializeOrderGrid(balanced.grid), adapter.serializeOrderGrid(repeated));
+    const minimum = await adapter.findMinimumViablePosition({ ...input, shape }, "base");
+    const regenerated = await adapter.generateOrderGrid({ ...input, shape, driver: "base",
+      monAmount: adapter.rawToDecimal(minimum.minimumMonAmountRaw, 18),
+      usdcAmount: adapter.rawToDecimal(minimum.minimumUsdcAmountRaw, 6) });
+    assert(regenerated.requiredMonRaw <= minimum.minimumMonAmountRaw);
+    assert(regenerated.requiredUsdcRaw <= minimum.minimumUsdcAmountRaw);
+    assert(adapter.validateOrderGrid(regenerated, input.minSize).deployable);
+  }
 
   for (const shape of ["spot", "curve", "bid_ask"]) {
     const undersized = await adapter.generateOrderGrid({

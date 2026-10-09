@@ -42,6 +42,14 @@ def test_frontend_accepts_only_the_latest_request() -> None:
     assert "tests passed" in completed.stdout
 
 
+def test_frontend_async_handlers_preserve_latest_job_ownership() -> None:
+    completed = subprocess.run(
+        [resolve_node(), "test_frontend_async.js"], cwd=ROOT / "sdk_reference",
+        check=True, capture_output=True, text=True,
+    )
+    assert "tests passed" in completed.stdout
+
+
 def test_persistent_sdk_worker_reuses_one_process_without_grid_changes() -> None:
     fixture = json.loads(
         (ROOT / "sdk_reference" / "fixtures" / "concentrated_liquidity_v0_0_95.json")

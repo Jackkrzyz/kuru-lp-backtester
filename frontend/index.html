@@ -21,10 +21,6 @@
         <div class="scope-note">Verified historical results. No wallet. No live orders.</div>
 
         <form id="backtest-form">
-          <div class="mode-switch" role="group" aria-label="Strategy mode">
-            <button class="mode-button active" data-mode="kuru_lp" type="button">Kuru LP</button>
-            <button class="mode-button" data-mode="advanced_mm_bot" type="button">Advanced MM Demo</button>
-          </div>
           <label>
             <span>Market</span>
             <input id="market" value="MON / USDC" readonly />
@@ -81,34 +77,15 @@
             </section>
           </div>
 
-          <div id="mm-controls" hidden>
-            <div class="field-grid">
-            <label><span>Starting cash</span><input id="starting-cash" readonly /></label>
-            <label><span>Starting inventory</span><input id="starting-inventory" readonly /></label>
-            <label><span>Bid offset</span><input id="bid-offset" readonly /></label>
-            <label><span>Ask offset</span><input id="ask-offset" readonly /></label>
-            <label><span>Order size</span><input id="order-size" readonly /></label>
-            <label><span>Min inventory</span><input id="minimum-inventory" readonly /></label>
-            <label><span>Max inventory</span><input id="maximum-inventory" readonly /></label>
-            <label><span>Maker fee</span><input id="maker-fee" readonly /></label>
-            <label><span>Cancel / replace</span><input id="cancel-replace" value="Enabled" readonly /></label>
-            </div>
-          </div>
-
-          <details class="advanced-settings">
-            <summary>Advanced simulation</summary>
+          <details class="price-settings">
+            <summary>Enter range as prices</summary>
             <label class="checkbox-row"><input id="absolute-range-mode" type="checkbox" /><span>Enter absolute prices directly</span></label>
             <div id="absolute-range-fields" class="field-grid" hidden>
               <label><span>Minimum price</span><input id="minimum-price" value="0.0263" inputmode="decimal" /></label>
               <label><span>Maximum price</span><input id="maximum-price" value="0.02795" inputmode="decimal" /></label>
             </div>
-            <label><span>Participation cap</span><select id="scenario"><option value="max_5_percent">5% of transaction volume</option><option value="max_10_percent" selected>10% of transaction volume</option><option value="max_25_percent">25% of transaction volume</option><option value="uncapped">Uncapped — high impact risk</option></select></label>
-            <div class="field-grid">
-              <label><span>Inclusion latency</span><input id="inclusion-latency" value="1 block" readonly /></label>
-              <label><span>Action cost</span><input id="action-fee" value="0 USDC" readonly /></label>
-              <label class="wide"><span>Impact threshold</span><input id="impact-threshold" value="25%" readonly /></label>
-            </div>
           </details>
+          <p class="simulator-note">Orders use the market state before the first selected block. Gas is excluded. Historical trades remain fixed; a large position can change real trading outcomes.</p>
 
           <button class="run-button" type="submit">
             <span id="run-button-label">Run backtest</span>
@@ -126,7 +103,7 @@
             <h2 id="run-title">MON / USDC · Relatively active</h2>
           </div>
           <div class="header-actions">
-            <div id="scenario-badge" class="scenario-badge">10% participation cap</div>
+            <div id="scenario-badge" class="scenario-badge">Kuru LP</div>
             <div id="status" class="status" role="status">No run yet</div>
           </div>
         </header>
@@ -215,8 +192,8 @@
         </section>
       </main>
     </div>
-    <script src="kuru_sdk_adapter.js" defer></script>
+    <script src="kuru_sdk_adapter.js?v=lp-contract-18" defer></script>
     <script src="request_gate.js" defer></script>
-    <script src="app.js?v=historical-range-3" defer></script>
+    <script src="app.js?v=lp-contract-18" defer></script>
   </body>
 </html>

@@ -46,7 +46,7 @@ def promote(
     interval = validation["interval"]
     first = int(interval["from_block"])
     last = int(interval["to_block"])
-    market = str(interval.get("market", manifest["market"])).lower()
+    market = str(validation.get("market", interval.get("market", ""))).lower()
     if market != str(manifest["market"]).lower():
         raise ValueError("validation market does not match the historical manifest")
     count = event_count(event_path)

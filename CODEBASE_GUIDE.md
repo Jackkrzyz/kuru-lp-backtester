@@ -100,7 +100,7 @@ This module joins the API, validated local inputs, official SDK adapter, LP engi
 |---|---|
 | `IntervalData` | Immutable bundle of a checkpoint book, decoded events, timestamps, parameters, and validation metadata. |
 | `decimal_text()` | Validate and normalize user decimal input without accepting excess precision. |
-| `percentage_price_bounds()` | Convert first-block midpoint percentages to outward tick-rounded raw prices. |
+| `percentage_price_bounds()` | Convert pre-interval midpoint percentages to outward tick-rounded raw prices. |
 | `validate_sdk_grid()` | Report each final SDK order that is below the market minimum size. |
 | `serialize_book()` / `deserialize_book()` | Store and restore the exact L3 checkpoint links and level totals. |
 | `prepare_interval_cache()` | Make a one-time RPC checkpoint cache before interactive use. |
@@ -179,7 +179,6 @@ This file owns the consumer interface and canvas replay.
 | `applyKuruResponse()` | Replace all metrics and replay frames with one returned run. |
 | `clearResult()`, `markConfigurationChanged()` | Prevent an old result from appearing under edited settings. |
 | `renderFrame()`, `drawPriceChart()`, `drawEquityChart()` | Rebuild order deltas and render client-side playback without rerunning Python. Static line layers are cached and only the visible prefix is drawn. |
-| `loadDemoReplay()` | Load saved data only for the labeled Advanced MM Demo mode. |
 
 `frontend/request_gate.js` gives each request a sequence and configuration revision. A response is accepted only if both still match.
 
@@ -190,12 +189,12 @@ Current frontend behavior:
 - Block timestamps give one time value for all logs in a block. Event order comes from transaction and log indexes.
 - Compaction keeps each financial change in a frame, but the UI displays the final state of that frame.
 - The token amount driver depends on the last edited token. It is included in the request as `amount_driver`.
-- Inclusion latency, maker fee, fixed action cost, and impact threshold use fixed values in the current Kuru LP form. The participation cap is the editable advanced setting.
+- The form has no simulation controls or MM demo. Initial orders use the state before the selected first block and enter at its start. Internal flips can trade after creation in the same transaction. Market rebates come from the local historical contract-rule cache. There is no artificial participation cap. Gas is excluded. A fixed 25 percent transaction-impact threshold is a warning, not a fill rule.
 - The range chart uses Trade data only. It shows complete validated L3 coverage separately. Current validated coverage is continuous from block 109092028 through block 109142027. The UI disables a range outside local validated coverage.
 
 ### `frontend/index.html` and `frontend/styles.css`
 
-`index.html` defines the two strategy modes, Kuru LP inputs, Advanced Simulation controls, result identity, charts, playback controls, metrics, and simulated-order list. It loads the generated SDK bundle, request gate, and application code in that order.
+`index.html` defines Kuru LP inputs, optional absolute-price entry, result identity, charts, playback controls, metrics, and the simulated-order list. It loads the generated SDK bundle, request gate, and application code in that order. The old MM engine remains in archived research scripts, but it has no product mode or demo fallback.
 
 `styles.css` defines the responsive two-panel layout, Kuru LP preview, metric cards, warning states, playback controls, and mobile breakpoints. It has no strategy or accounting logic.
 

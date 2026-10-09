@@ -4,8 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import secrets
+import socket
+import subprocess
 import time
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,9 +25,56 @@ ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "frontend"
 
 
+def browser_urls(host: str, port: int, access_token: str | None) -> list[str]:
+    """Print usable interface addresses instead of a wildcard bind address."""
+    addresses = [host]
+    if host == "0.0.0.0":
+        candidates: list[str] = []
+        try:
+            result = subprocess.run(
+                ["hostname", "-I"], capture_output=True, text=True, timeout=2, check=True
+            )
+            candidates.extend(result.stdout.split())
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            candidates.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+        except OSError:
+            pass
+        addresses = []
+        for value in candidates:
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError:
+                continue
+            if address.version == 4 and not address.is_loopback and not address.is_unspecified:
+                if value not in addresses:
+                    addresses.append(value)
+        addresses = addresses or ["127.0.0.1"]
+    suffix = f"/?access_token={access_token}" if access_token else "/"
+    return [f"http://{address}:{port}{suffix}" for address in addresses]
+
+
 class BacktestHandler(SimpleHTTPRequestHandler):
     service: BacktestService
     jobs: BacktestJobManager
+    access_token: str | None = None
+
+    def authorized(self) -> bool:
+        origin = self.headers.get("Origin")
+        if origin and origin != f"http://{self.headers.get('Host', '')}":
+            return False
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            return False
+        if self.access_token is None:
+            return True
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            supplied = cookie.get("kuru_access")
+            return supplied is not None and secrets.compare_digest(supplied.value, self.access_token)
+        except Exception:
+            return False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(FRONTEND), **kwargs)
@@ -53,6 +105,17 @@ class BacktestHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/" and self.access_token is not None:
+            token = parse_qs(parsed.query).get("access_token", [""])[0]
+            if secrets.compare_digest(token, self.access_token):
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Set-Cookie", f"kuru_access={self.access_token}; HttpOnly; SameSite=Strict; Path=/")
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+        if not self.authorized():
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "Open the access URL printed by the server."})
+            return
         if path == "/api/intervals":
             try:
                 self.send_json(HTTPStatus.OK, self.service.interval_metadata())
@@ -102,6 +165,9 @@ class BacktestHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        if not self.authorized():
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "server access token is required"})
+            return
         if urlparse(self.path).path != "/api/backtests":
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "unknown API path"})
             return
@@ -116,12 +182,17 @@ class BacktestHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.ACCEPTED, created)
         except BacktestInputError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": error.payload()})
+        except JobError as error:
+            self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": str(error)})
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
         except Exception as error:  # Keep backend failures visible. Never return demo data.
             self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
 
     def do_DELETE(self) -> None:
+        if not self.authorized():
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "server access token is required"})
+            return
         path = urlparse(self.path).path
         parts = path.strip("/").split("/")
         if len(parts) != 3 or parts[:2] != ["api", "backtests"]:
@@ -140,13 +211,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--maximum-workers", type=int, default=2)
     args = parser.parse_args()
     service = BacktestService()
-    jobs = BacktestJobManager()
+    if args.maximum_workers < 1:
+        parser.error("maximum-workers must be at least one")
+    jobs = BacktestJobManager(maximum_workers=args.maximum_workers)
     BacktestHandler.service = service
     BacktestHandler.jobs = jobs
+    BacktestHandler.access_token = None if args.host in {"127.0.0.1", "localhost", "::1"} else secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((args.host, args.port), BacktestHandler)
-    print(f"Kuru backtest server: http://{args.host}:{args.port}", flush=True)
+    print("Kuru backtest server. Open in your browser:", flush=True)
+    for url in browser_urls(args.host, server.server_port, BacktestHandler.access_token):
+        print(url, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

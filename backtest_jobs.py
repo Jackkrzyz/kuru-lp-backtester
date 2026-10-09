@@ -43,13 +43,15 @@ class JobError(RuntimeError):
 
 
 class BacktestJobManager:
-    def __init__(self, root: Path = JOB_ROOT) -> None:
+    def __init__(self, root: Path = JOB_ROOT, maximum_workers: int = 2) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self._processes: dict[str, subprocess.Popen[bytes]] = {}
         self._lock = threading.Lock()
+        self._admission_lock = threading.Lock()
+        self.maximum_workers = maximum_workers
+        self._closed = False
         self._sdk_broker: SdkGridBroker | None = None
-        self._cleanup_abandoned_temporary_files()
 
     def _ensure_sdk_broker(self) -> SdkGridBroker:
         with self._lock:
@@ -62,19 +64,27 @@ class BacktestJobManager:
             return self._sdk_broker
 
     def close(self) -> None:
-        """Stop the shared SDK process and its private local broker."""
+        """Stop owned workers before closing their shared SDK broker."""
+        with self._admission_lock:
+            self._closed = True
+            for run_id, process in tuple(self._processes.items()):
+                if process.poll() is None:
+                    status = self._read_status(run_id)
+                    atomic_write_bytes(self._directory(run_id) / "cancel.requested", b"cancel\n")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    status.update(status="canceled", stage="canceled", canceled_at=utc_now(), failure_reason="server shut down")
+                    self._write_status(run_id, status)
+                    live_status_path(run_id).unlink(missing_ok=True)
         with self._lock:
             broker = self._sdk_broker
             self._sdk_broker = None
         if broker is not None:
             broker.close()
-
-    def _cleanup_abandoned_temporary_files(self) -> None:
-        """Remove only incomplete atomic-write files left by dead workers."""
-        root = self.root.resolve()
-        for path in self.root.rglob("*.tmp"):
-            if path.is_file() and root in path.resolve().parents:
-                path.unlink(missing_ok=True)
 
     def _directory(self, run_id: str) -> Path:
         if not run_id.startswith("job-") or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in run_id):
@@ -107,6 +117,16 @@ class BacktestJobManager:
         atomic_write_bytes(self._directory(run_id) / "status.json", canonical_bytes(status) + b"\n")
 
     def create(self, request: dict[str, Any]) -> dict[str, Any]:
+        with self._admission_lock:
+            if self._closed:
+                raise JobError("server is shutting down")
+            with self._lock:
+                self._processes = {key: process for key, process in self._processes.items() if process.poll() is None}
+                if len(self._processes) >= self.maximum_workers:
+                    raise JobError("maximum active backtest count reached; wait for a run to finish")
+            return self._create(request)
+
+    def _create(self, request: dict[str, Any]) -> dict[str, Any]:
         broker = self._ensure_sdk_broker()
         created = utc_now()
         request_sha = hashlib.sha256(canonical_bytes(request)).hexdigest()
@@ -145,22 +165,31 @@ class BacktestJobManager:
             "--job-dir",
             str(directory),
         ]
-        process = subprocess.Popen(
-            command,
-            cwd=ROOT,
-            env={
-                **os.environ,
-                "KURU_SDK_BROKER_URL": broker.url,
-                "KURU_SDK_BROKER_TOKEN": broker.token,
-            },
-            stdin=subprocess.DEVNULL,
-            stdout=(directory / "worker.stdout.log").open("ab"),
-            stderr=(directory / "worker.stderr.log").open("ab"),
-        )
+        try:
+            # The child keeps its own descriptors. Close the parent's copies
+            # even when launch fails, rather than leaking two handles per job.
+            with (directory / "worker.stdout.log").open("ab") as stdout, (directory / "worker.stderr.log").open("ab") as stderr:
+                process = subprocess.Popen(
+                    command,
+                    cwd=ROOT,
+                    env={
+                        **os.environ,
+                        "KURU_SDK_BROKER_URL": broker.url,
+                        "KURU_SDK_BROKER_TOKEN": broker.token,
+                    },
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        except OSError as error:
+            status.update(status="failed", stage="failed", failed_at=utc_now(),
+                          failure_reason=f"worker launch failed: {error}")
+            self._write_status(run_id, status)
+            raise JobError("the backtest worker could not start") from error
         with self._lock:
             self._processes[run_id] = process
-        status["worker_pid"] = process.pid
-        self._write_status(run_id, status)
+        # The worker publishes its PID and progress. Do not write the queued
+        # status after launch: a fast worker may already have completed.
         return {"run_id": run_id, "owner_token": owner_token, "status": "queued", "status_url": f"/api/backtests/{run_id}"}
 
     def authorize(self, run_id: str, owner_token: str | None) -> dict[str, Any]:

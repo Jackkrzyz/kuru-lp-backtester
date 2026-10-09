@@ -895,6 +895,10 @@ def verify_validation_summary(path: Path) -> dict[str, Any]:
         raise RuntimeError("validation summary has a non-zero aggregate-size error")
     if validation.get("queue_invariant_status") != "pass":
         raise RuntimeError("validation summary does not contain passing queue invariants")
+    if validation.get("maximum_midpoint_error") != 0:
+        raise RuntimeError("validation summary has a non-zero or missing midpoint error")
+    if payload.get("cancellation_summary_audit", {}).get("status") != "pass":
+        raise RuntimeError("validation summary does not contain a passing cancellation audit")
     return payload
 
 

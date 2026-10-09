@@ -744,8 +744,9 @@ def event_row(
     }
 
 
-def market_parameters(rpc: RpcClient, market: str) -> dict[str, Any]:
-    data = rpc.contract_call(market, "getMarketParams()", DEPLOYMENT_BLOCK)
+def market_parameters(rpc: RpcClient, market: str, block: int = DEPLOYMENT_BLOCK) -> dict[str, Any]:
+    """Read parameters at the requested state block; preserve the legacy default."""
+    data = rpc.contract_call(market, "getMarketParams()", block)
     values = abi_decode(
         (
             "uint32",

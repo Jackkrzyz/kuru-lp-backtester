@@ -6,7 +6,7 @@ The Kuru LP form now runs a new local strategy simulation. It does not load the 
 
 ## Request path
 
-1. `frontend/app.js` submits the selected `from_block` and `to_block`. It gets the local reconstructed first-block midpoint and converts the lower and upper range percentages to outward tick-rounded absolute limits. Advanced mode can use direct absolute limits.
+1. `frontend/app.js` submits the selected `from_block` and `to_block`. It gets the local reconstructed midpoint before `from_block` and converts the lower and upper range percentages to outward tick-rounded absolute limits. The range can also use direct absolute limits.
 2. The browser build of the canonical Kuru SDK adapter generates the exact position. It validates every final integer order size against the market `minSize`.
 3. The same grid supplies the preview, required token amounts, validation details, and `order_grid` in `POST /api/backtests`.
 4. `backtest_server.py` creates an isolated job and returns HTTP 202 with a job ID and owner token.
@@ -15,7 +15,7 @@ The Kuru LP form now runs a new local strategy simulation. It does not load the 
 7. `backtest_service.py` calculates the reference and tick-rounded limits again and normalizes every submitted field. A private local broker keeps one official SDK `0.0.95` Node.js adapter process warm across isolated jobs. If the broker stops, the worker uses the same adapter in a one-shot process.
 8. The backend rejects a reference-price mismatch, range mismatch, SDK-grid mismatch, or final order below `minSize`. A minimum-size failure has a structured code and order details.
 9. `HistoricalEventStore`, `CheckpointStore`, and `ReconstructionEngine` load the requested covered range from local storage. They reconstruct the state before `from_block`, then `ReplayCursor` streams through `to_block`. The run does not call Envio or RPC. The verified JSONL files stay authoritative.
-10. `kuru_lp.run_lp()` places all initial grid orders in the verified L3 queues. It applies inclusion delay, queue priority, partial fills, transaction participation limits, capital reservations, and repeated flip orders.
+10. `kuru_lp.run_lp()` applies contract admission checks to initial grid orders and places accepted orders at the queue tail. Initial orders use the pre-interval state and enter at the first selected block. It applies queue priority, partial fills, exact token rounding, capital reservations, maker rebates, and repeated flip orders. Internal flips can trade after creation in the same transaction. There is no artificial participation cap.
 11. The worker compacts replay records directly in memory. It does not write and read a temporary timeline JSONL file. It writes an atomic result, a separate detailed-fill file, and a completion marker. The browser gets the compact result from `GET /api/backtests/{job_id}/result`. An optional client gets detailed fills from `GET /api/backtests/{job_id}/fills`.
 12. The browser replaces all metrics and playback frames with that result.
 
@@ -35,11 +35,11 @@ If the browser runs on Windows and the server runs in WSL, bind the server to al
 python backtest_server.py --host 0.0.0.0 --port 8000
 ```
 
-Run `hostname -I` in WSL. Open `http://<first-wsl-address>:8000` in Windows.
+Open the complete access URL printed by the server. It includes the detected WSL IP address and sets the browser access cookie. The server allows two active jobs by default and stops its workers when it closes.
 
 ## Integration configurations
 
-Both configurations use `relatively_active`, one-block inclusion delay, a 10 percent transaction participation cap, zero maker fee, and zero fixed action cost.
+Both configurations use `relatively_active`, initial inclusion at its first block, no artificial participation cap, the market's historical maker rebate (zero here), and no gas estimate. Older hashes below record the former engine. See `LP_CONTRACT_PARITY.md` for the current engine checks.
 
 | Field | A | B |
 |---|---:|---:|
@@ -65,7 +65,7 @@ Any Kuru LP field change clears the visible result and marks it stale. A request
 
 An edited form also cancels its current job. The UI cannot use an old result for a new configuration. A local job has one of these states: `queued`, `running`, `completed`, `failed`, `canceled`, or `stalled`.
 
-The old cancel-and-replace artifacts are available only in the explicitly labeled **Advanced MM Demo** mode.
+The product contains only Kuru LP. The old cancel-and-replace research artifacts are no longer loaded by the frontend.
 
 ## Position validity
 

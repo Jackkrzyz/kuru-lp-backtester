@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - not available in Windows Python.
 
 import l3_vertical_slice as l3
 import strategy_vertical_slice as mm
+import lp_contract_rules as contract
 from rebuild_from_chain import MARKET_ADDRESS, RpcClient, market_parameters
 
 
@@ -63,6 +64,14 @@ class LPConfig:
     max_transaction_participation_percent: Optional[Decimal] = Decimal("10")
     material_impact_threshold_percent: Decimal = Decimal("25")
     min_size_raw: int = 0
+    contract_rules: bool = False
+    tick_size_raw: int = 1
+    max_size_raw: int = 2**96 - 1
+    base_decimals: int = 18
+    quote_decimals: int = 6
+    price_precision_raw: int = 100_000_000
+    vault_best_bid_raw: int = 0
+    vault_best_ask_raw: int = 0
 
 
 @dataclass
@@ -84,6 +93,7 @@ class LPOrder:
     reserved_cash: Decimal = ZERO
     reserved_inventory: Decimal = ZERO
     placement_sequence: int = 0
+    cycle_start_side: Optional[str] = None
     simulated_ahead_ids: list[str] = field(default_factory=list)
 
 
@@ -107,6 +117,8 @@ class LPState:
     active_prices: dict[str, list[int]] = field(default_factory=lambda: {"buy": [], "sell": []})
     queue_followers: dict[int, set[str]] = field(default_factory=lambda: defaultdict(set))
     indexed_order_ids: set[str] = field(default_factory=set)
+    historical_ahead_sizes: dict[int, int] = field(default_factory=dict)
+    contract_config: Optional[LPConfig] = None
 
 
 class BacktestCancelled(RuntimeError):
@@ -298,8 +310,26 @@ def generate_distribution(
 
 def _reserve(state: LPState, order: LPOrder, price_precision: int, size_precision: int) -> None:
     size = Decimal(order.remaining_raw) / Decimal(size_precision)
+    if state.contract_config is not None and order.origin_price_raw is not None:
+        config = state.contract_config
+        if order.side == "buy":
+            order.reserved_cash = contract.token_amount(contract.quote_raw(
+                order.price_raw, order.remaining_raw, price_precision, size_precision,
+                config.quote_decimals), config.quote_decimals)
+            state.reserved_cash += order.reserved_cash
+            state.cash += order.reserved_cash
+        else:
+            order.reserved_inventory = contract.token_amount(contract.base_raw(
+                order.remaining_raw, size_precision, config.base_decimals), config.base_decimals)
+            state.reserved_inventory += order.reserved_inventory
+            state.inventory += order.reserved_inventory
+        return
     if order.side == "buy":
         order.reserved_cash = size * Decimal(order.price_raw) / Decimal(price_precision)
+        if state.contract_config is not None:
+            order.reserved_cash = contract.token_amount(contract.quote_raw(
+                order.price_raw, order.remaining_raw, price_precision, size_precision,
+                state.contract_config.quote_decimals, round_up=True), state.contract_config.quote_decimals)
         if state.cash - state.reserved_cash < order.reserved_cash:
             raise RuntimeError("the USDC deposit is too small for the LP bids")
         state.reserved_cash += order.reserved_cash
@@ -380,6 +410,7 @@ def initial_orders(
             eligible_block=checkpoint_block + inclusion_delay_blocks,
             placed_block=checkpoint_block,
             placement_sequence=placement_sequence,
+            cycle_start_side=position.side,
         )
         _reserve(state, order, price_precision, size_precision)
         state.orders[order_id] = order
@@ -406,8 +437,42 @@ def activate_orders(
         order = state.orders[order_id]
         if order.status != "pending":
             continue
+        config = state.contract_config
+        if config is not None and order.origin_price_raw is None:
+            contract.validate_initial_order(order.side, order.price_raw, order.flip_price_raw,
+                                            order.size_raw, config.tick_size_raw, config.min_size_raw, config.max_size_raw)
+            bid, ask = book.best_prices()
+            bid_scaled = (bid * 10**18 // config.price_precision_raw) if bid is not None else None
+            ask_scaled = (ask * 10**18 // config.price_precision_raw) if ask is not None else None
+            if config.vault_best_bid_raw:
+                bid_scaled = max(bid_scaled or 0, config.vault_best_bid_raw)
+            if config.vault_best_ask_raw:
+                ask_scaled = min(ask_scaled or config.vault_best_ask_raw, config.vault_best_ask_raw)
+            order_price_scaled = order.price_raw * 10**18 // config.price_precision_raw
+            crossing = ((order.side == "buy" and ask_scaled is not None and order_price_scaled >= ask_scaled)
+                        or (order.side == "sell" and bid_scaled is not None and order_price_scaled <= bid_scaled))
+            if crossing:
+                # batchProvisionLiquidity(..., false) returns without placing a crossing order.
+                state.reserved_cash -= order.reserved_cash
+                state.reserved_inventory -= order.reserved_inventory
+                order.reserved_cash = ZERO
+                order.reserved_inventory = ZERO
+                order.status = "skipped"
+                activations.append({"order_id": order.order_id, "side": order.side,
+                                    "activation_block": block, "status": "skipped", "reason": "crosses_book"})
+                continue
         order.status = "active"
+        if config is not None and order.origin_price_raw is None and order.side == "buy":
+            withdrawable = contract.token_amount(contract.quote_raw(
+                order.price_raw, order.remaining_raw, config.price_precision_raw, size_precision,
+                config.quote_decimals), config.quote_decimals)
+            rounding_loss = order.reserved_cash - withdrawable
+            state.cash -= rounding_loss
+            state.reserved_cash -= rounding_loss
+            order.reserved_cash = withdrawable
         order.queue_ahead_ids = list(book.queue(order.side == "buy", order.price_raw))
+        for historical_id in order.queue_ahead_ids:
+            state.historical_ahead_sizes[historical_id] = book.orders[historical_id].size
         earlier_simulated = [
             item
             for item in state.active_by_price[(order.side, order.price_raw)]
@@ -440,6 +505,7 @@ def update_queue_ahead(
         return set()
     _ensure_indexes(state)
     order_id = int(event.args.get("order_id", 0))
+    previous_size = state.historical_ahead_sizes.get(order_id, 0)
     followers = tuple(state.queue_followers.get(order_id, ()))
     changed: set[str] = set()
     if counters is not None:
@@ -455,11 +521,19 @@ def update_queue_ahead(
             order.queue_ahead_raw -= int(event.args["filled_size"])
             if int(event.args["updated_size"]) == 0:
                 order.queue_ahead_ids.remove(order_id)
+        elif event.name == "FlipOrderUpdated":
+            order.queue_ahead_raw += int(event.args["size"]) - previous_size
         if order_id not in order.queue_ahead_ids:
             state.queue_followers[order_id].discard(simulated_id)
         if order.queue_ahead_raw < 0:
             raise RuntimeError("LP queue-ahead size became negative")
         changed.add(simulated_id)
+    if event.name == "FlipOrderUpdated":
+        state.historical_ahead_sizes[order_id] = int(event.args["size"])
+    elif event.name == "Trade":
+        state.historical_ahead_sizes[order_id] = int(event.args["updated_size"])
+    elif event.name == "OrderCanceled":
+        state.historical_ahead_sizes.pop(order_id, None)
     return changed
 
 
@@ -499,6 +573,12 @@ def _release_fill_reserve(
     size = Decimal(fill_raw) / Decimal(size_precision)
     if order.side == "buy":
         released = size * Decimal(order.price_raw) / Decimal(price_precision)
+        if state.contract_config is not None:
+            remaining = order.remaining_raw - fill_raw
+            remaining_reserve = contract.token_amount(contract.quote_raw(
+                order.price_raw, remaining, price_precision, size_precision,
+                state.contract_config.quote_decimals), state.contract_config.quote_decimals)
+            released = order.reserved_cash - remaining_reserve
         order.reserved_cash -= released
         state.reserved_cash -= released
     else:
@@ -527,11 +607,26 @@ def _place_or_merge_flip(
     if existing is not None:
         existing.size_raw += flip_size_raw
         existing.remaining_raw += flip_size_raw
-        added = LPOrder("", side, existing.price_raw, existing.flip_price_raw, flip_size_raw, flip_size_raw,
-                        "pending", event.block_number, event.block_number)
-        _reserve(state, added, price_precision, size_precision)
-        existing.reserved_cash += added.reserved_cash
-        existing.reserved_inventory += added.reserved_inventory
+        if config.contract_rules:
+            if side == "buy":
+                total = contract.token_amount(contract.quote_raw(existing.price_raw,
+                    existing.remaining_raw, price_precision, size_precision, config.quote_decimals), config.quote_decimals)
+                delta = total - existing.reserved_cash
+                state.cash += delta
+                state.reserved_cash += delta
+                existing.reserved_cash = total
+            else:
+                delta = contract.token_amount(contract.base_raw(flip_size_raw, size_precision,
+                    config.base_decimals), config.base_decimals)
+                state.inventory += delta
+                state.reserved_inventory += delta
+                existing.reserved_inventory += delta
+        else:
+            added = LPOrder("", side, existing.price_raw, existing.flip_price_raw, flip_size_raw, flip_size_raw,
+                            "pending", event.block_number, event.block_number)
+            _reserve(state, added, price_precision, size_precision)
+            existing.reserved_cash += added.reserved_cash
+            existing.reserved_inventory += added.reserved_inventory
         _increase_simulated_followers(state, existing, flip_size_raw)
         if filled.remaining_raw == 0:
             existing.paired_order_id = None
@@ -557,13 +652,15 @@ def _place_or_merge_flip(
         remaining_raw=flip_size_raw,
         status="pending",
         # A contract-created flip is added during the fill transaction. It can
-        # trade after that transaction without a second external inclusion delay.
+        # trade after its causal creation, including later calls in that same
+        # transaction. The archived engine retains its old transaction gate.
         eligible_block=event.block_number,
         placed_block=event.block_number,
         origin_price_raw=filled.price_raw,
         created_transaction_hash=event.transaction_hash,
         paired_order_id=filled.order_id if filled.remaining_raw else None,
         placement_sequence=placement_sequence,
+        cycle_start_side=filled.cycle_start_side or filled.side,
     )
     if filled.remaining_raw:
         filled.paired_order_id = order_id
@@ -615,7 +712,7 @@ def apply_fills(
     for order in candidates:
         if remaining_event <= 0 or order.status != "active" or order.queue_ahead_raw:
             continue
-        if event.block_number < order.eligible_block or order.created_transaction_hash == event.transaction_hash:
+        if event.block_number < order.eligible_block or (not config.contract_rules and order.created_transaction_hash == event.transaction_hash):
             continue
         proxy = mm.StrategyOrder(order.order_id, order.side, order.price_raw, order.size_raw,
                                  order.remaining_raw, order.status, order.eligible_block,
@@ -633,6 +730,24 @@ def apply_fills(
         cash_delta, inventory_delta, fee, notional = mm.maker_fill_accounting(
             order.side, size, price, config.maker_fee_bps
         )
+        if config.contract_rules:
+            quote = contract.quote_raw(order.price_raw, fill_raw, price_precision, size_precision, config.quote_decimals)
+            base = contract.base_raw(fill_raw, size_precision, config.base_decimals)
+            notional = contract.token_amount(quote, config.quote_decimals)
+            rebate_rate = int(config.maker_fee_bps)
+            if order.side == "buy":
+                remaining_reserve = contract.token_amount(contract.quote_raw(
+                    order.price_raw, order.remaining_raw - fill_raw, price_precision,
+                    size_precision, config.quote_decimals), config.quote_decimals)
+                quote_rebate = quote * rebate_rate // 10_000
+                cash_delta = -(order.reserved_cash - remaining_reserve) + contract.token_amount(quote_rebate, config.quote_decimals)
+                inventory_delta = ZERO
+                fee = -contract.token_amount(quote_rebate, config.quote_decimals)
+            else:
+                base_rebate = base * rebate_rate // 10_000
+                cash_delta = ZERO
+                inventory_delta = -contract.token_amount(base, config.base_decimals) + contract.token_amount(base_rebate, config.base_decimals)
+                fee = -contract.token_amount(base_rebate, config.base_decimals) * price
         _release_fill_reserve(state, order, fill_raw, price_precision, size_precision)
         state.cash += cash_delta
         state.inventory += inventory_delta
@@ -648,11 +763,16 @@ def apply_fills(
         remaining_event -= fill_raw
         if budget is not None:
             budget.remaining_raw -= fill_raw
-        if order.origin_price_raw is not None:
-            state.earned_flip_spread += (
+        if order.origin_price_raw is not None and (
+            not config.contract_rules or order.side != order.cycle_start_side
+        ):
+            earned = (
                 Decimal(abs(order.price_raw - order.origin_price_raw))
                 / Decimal(price_precision) * size
             )
+            if config.contract_rules and order.side == "buy":
+                earned *= Decimal(order.price_raw) / Decimal(order.origin_price_raw)
+            state.earned_flip_spread += earned
         fill = {
             "strategy_order_id": order.order_id,
             "side": order.side,
@@ -794,6 +914,7 @@ def run_lp(
     initial_cash = Decimal(config.quote_deposit_raw) / Decimal(10**6)
     initial_inventory = Decimal(config.base_deposit_raw) / Decimal(10**18)
     state = LPState(initial_cash, initial_inventory)
+    state.contract_config = config if config.contract_rules else None
     initial_mark = Decimal(initial_mark_raw) / Decimal(price_precision)
     initial_value = initial_cash + initial_inventory * initial_mark
     charge_initial_action_fee(state, config)
@@ -998,8 +1119,12 @@ def run_lp(
         "causality": {
             "initial_inclusion_delay_blocks": config.inclusion_delay_blocks,
             "initial_orders_first_eligible_block": start_block - 1 + config.inclusion_delay_blocks,
-            "flip_order_rule": "created after its causal fill and eligible after that transaction",
-            "same_transaction_flip_fill_allowed": False,
+            "flip_order_rule": (
+                "created after its causal fill and eligible for later matching, including the same transaction"
+                if config.contract_rules else
+                "created after its causal fill and eligible after that transaction"
+            ),
+            "same_transaction_flip_fill_allowed": config.contract_rules,
         },
         "sdk_reference": {"package": "@kuru-labs/kuru-sdk", "version": "0.0.95",
                           "npm_git_head": "c6a1e9eced12d634fa879ec46c52baff8a50f3c3"},

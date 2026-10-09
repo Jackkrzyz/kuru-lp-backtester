@@ -48672,7 +48672,10 @@ var KuruSdkAdapter = (() => {
       }
       function requiredAmounts(orders, config) {
         const requiredMonRaw = orders.filter((order) => order.side === "sell").reduce((sum, order) => sum + order.liquidity * 10n ** config.baseAssetDecimals / config.sizePrecision, 0n);
-        const requiredUsdcRaw = orders.filter((order) => order.side === "buy").reduce((sum, order) => sum + order.price * order.liquidity * 10n ** config.quoteAssetDecimals / (config.pricePrecision * config.sizePrecision), 0n);
+        const requiredUsdcRaw = orders.filter((order) => order.side === "buy").reduce((sum, order) => sum + ceilDiv(
+          ceilDiv(order.price * order.liquidity, config.sizePrecision) * 10n ** config.quoteAssetDecimals,
+          config.pricePrecision
+        ), 0n);
         return { requiredMonRaw, requiredUsdcRaw };
       }
       async function generateOrderGrid(input) {
@@ -48720,7 +48723,7 @@ var KuruSdkAdapter = (() => {
           price: BigInt(item.price),
           flipPrice: BigInt(item.flipPrice),
           liquidity: BigInt(item.liquidity),
-          quoteNotionalRaw: BigInt(item.price) * BigInt(item.liquidity) * 10n ** config.quoteAssetDecimals / (config.pricePrecision * config.sizePrecision)
+          quoteNotionalRaw: BigInt(item.price) * BigInt(item.liquidity) / config.sizePrecision * 10n ** config.quoteAssetDecimals / config.pricePrecision
         })).sort((left, right) => left.price < right.price ? -1 : left.price > right.price ? 1 : 0);
         if (!orders.some((item) => item.side === "buy") || !orders.some((item) => item.side === "sell")) {
           throw new Error("The range must contain at least one bid and one ask.");
@@ -48816,6 +48819,35 @@ var KuruSdkAdapter = (() => {
           validation: finalResult.validation
         };
       }
+      async function balanceQuoteDeposit(input) {
+        const budget = decimalToRaw(input.usdcAmount, Number(input.quoteAssetDecimals));
+        if (budget <= 0n) throw new Error("Enter a positive USDC amount.");
+        const seed = await generateOrderGrid({ ...input, driver: "quote" });
+        const evaluate = async (amount) => generateOrderGrid({
+          ...input,
+          driver: "base",
+          monAmount: rawToDecimal(amount, Number(input.baseAssetDecimals))
+        });
+        let low = 0n;
+        let high = seed.requiredMonRaw + 1n;
+        let candidate = await evaluate(high);
+        for (let step = 0; candidate.requiredUsdcRaw <= budget && step < 256; step += 1) {
+          low = high;
+          high *= 2n;
+          candidate = await evaluate(high);
+        }
+        if (candidate.requiredUsdcRaw <= budget) throw new Error("The balance search exceeded its limit.");
+        while (low + 1n < high) {
+          const middle = (low + high) / 2n;
+          candidate = await evaluate(middle);
+          if (candidate.requiredUsdcRaw <= budget) low = middle;
+          else high = middle;
+        }
+        if (!low) throw new Error("The USDC amount cannot fund this position.");
+        const grid = await evaluate(low);
+        if (grid.requiredUsdcRaw > budget) throw new Error("The balanced position exceeds the USDC deposit.");
+        return { monAmountRaw: low, grid };
+      }
       function serializeOrderGrid(grid) {
         return {
           schema_version: grid.schemaVersion,
@@ -48861,6 +48893,7 @@ var KuruSdkAdapter = (() => {
         generateOrderGrid,
         validateOrderGrid,
         findMinimumViablePosition,
+        balanceQuoteDeposit,
         serializeOrderGrid
       };
     }

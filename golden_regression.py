@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backtest_service import BacktestService, canonical_sdk_grid
+from backtest_service import BacktestService, canonical_sdk_grid, ENGINE_VERSION
 
 
 ROOT = Path(__file__).resolve().parent
@@ -31,13 +31,8 @@ def base_request() -> dict:
         "upper_range_percent": "3",
         "fee_percent": "0.30",
         "mon_amount": "6000",
-        "usdc_amount": "180",
-        "amount_driver": "both",
-        "inclusion_delay_blocks": 1,
-        "max_transaction_participation_percent": 10,
-        "maker_fee_bps": 0,
-        "fixed_action_fee": 0,
-        "material_impact_threshold_percent": 25,
+        "usdc_amount": "200",
+        "amount_driver": "base",
     }
 
 
@@ -92,6 +87,8 @@ def run_report(output: Path) -> dict:
         })
     report = {
         "schema_version": "1.0",
+        "engine_version": ENGINE_VERSION,
+        "configuration": base_request(),
         "comparison": "named wrapper versus generalized block-range service",
         "all_passed": all(item["status"] == "pass" for item in rows),
         "fixtures": rows,
@@ -101,7 +98,8 @@ def run_report(output: Path) -> dict:
 
 
 def main() -> int:
-    output = ROOT / "golden_regression_report.json"
+    # Keep the previous engine's recorded results as an archive.
+    output = ROOT / "lp_contract_regression_report.json"
     report = run_report(output)
     for item in report["fixtures"]:
         print(

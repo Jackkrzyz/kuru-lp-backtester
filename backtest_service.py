@@ -33,7 +33,7 @@ CACHE_ROOT = ROOT / ".cache" / "backtest_intervals"
 RUN_ROOT = ROOT / ".cache" / "backtest_runs"
 SDK_GRID_CACHE_ROOT = ROOT / ".cache" / "sdk_grids"
 DECODED_EVENT_HOT_CACHE_ROOT = Path(tempfile.gettempdir()) / "kuru_decoded_events"
-ENGINE_VERSION = "kuru-lp-local-v14"
+ENGINE_VERSION = "kuru-lp-contract-v18"
 CACHE_SCHEMA_VERSION = "1.0"
 REPLAY_SCHEMA_VERSION = "1.2"
 PRICE_DECIMALS = 8
@@ -147,13 +147,24 @@ def semantic_timeline_sha256(records: list[dict[str, Any]]) -> str:
 
 def atomic_write_bytes(path: Path, payload: bytes, *, durable: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
-    with temporary.open("wb") as output:
-        output.write(payload)
-        output.flush()
-        if durable:
-            os.fsync(output.fileno())
-    temporary.replace(path)
+    # Different server threads can write the same status path. A PID-only
+    # temporary name lets their writes collide; each write needs its own file.
+    with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent,
+            prefix=f"{path.name}.{os.getpid()}.", suffix=".tmp", delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(payload)
+            output.flush()
+            if durable:
+                os.fsync(output.fileno())
+        except BaseException:
+            output.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def decimal_text(value: Any, decimals: int, field: str, *, positive: bool = True) -> str:
@@ -171,7 +182,9 @@ def decimal_text(value: Any, decimals: int, field: str, *, positive: bool = True
         raise BacktestInputError(f"{field} is outside the supported range") from error
     if normalized != number:
         raise BacktestInputError(f"{field} has more than {decimals} decimal places")
-    text = format(normalized, "f").rstrip("0").rstrip(".")
+    text = format(normalized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
     return text or "0"
 
 
@@ -218,7 +231,9 @@ def percentage_price_bounds(
 
 
 def raw_price_text(value_raw: int, price_precision: int) -> str:
-    text = format(Decimal(value_raw) / Decimal(price_precision), "f").rstrip("0").rstrip(".")
+    text = format(Decimal(value_raw) / Decimal(price_precision), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
     return text or "0"
 
 
@@ -444,6 +459,28 @@ class BacktestService:
             MAX_COMPACT_FRAMES
         )
 
+    def contract_rules(self, data: IntervalData) -> dict[str, Any]:
+        path = ROOT / ".cache/lp_contract_rules.json"
+        if not path.is_file():
+            raise BacktestInputError("Run python prepare_lp_contract_rules.py before backtesting.", code="contract_rules_missing")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        block = data.checkpoint_block if data.checkpoint_block is not None else int(data.validation["interval"]["from_block"]) - 1
+        row = payload["checkpoints"].get(str(block))
+        if payload.get("market") != MARKET_ADDRESS or row is None or row["checkpoint_sha256"] != data.checkpoint_sha256:
+            raise BacktestInputError("Historical contract rules do not match this checkpoint.", code="contract_rules_mismatch")
+        # These rules are checked against this implementation, not every future
+        # upgrade. Never apply them silently to an untested implementation.
+        if row.get("implementation_code_sha256") != "7c7a6e72320d71112aaf58ad3604224f15bdf0734f5790cf79d2b04194c80d42":
+            raise BacktestInputError("This historical contract implementation has not passed LP parity tests.",
+                                     code="unsupported_contract_implementation")
+        if int(row.get("vault_bid_size", 0)) or int(row.get("vault_ask_size", 0)):
+            raise BacktestInputError("Active vault liquidity needs separate historical LP validation.",
+                                     code="unsupported_active_vault")
+        for key in ("price_precision", "size_precision", "tick_size", "min_size", "base_decimals", "quote_decimals"):
+            if int(row["parameters"][key]) != data.parameters[key]:
+                raise BacktestInputError("Historical contract parameters do not match the verified book.")
+        return row
+
     def load_interval(self, name: str, metrics: dict[str, float] | None = None) -> IntervalData:
         if name in self._intervals:
             return self._intervals[name]
@@ -527,17 +564,8 @@ class BacktestService:
         if event_count == 0:
             raise BacktestInputError("the requested local range contains no market events")
 
-        # The range reference is the reconstructed midpoint after all events in
-        # its first block. This is the same rule used by the golden intervals.
-        reference_book = historical_system.deserialize_book(
-            serialize_book(reconstructed.book)
-        )
-        for event in cursor:
-            if event.block_number != from_block:
-                break
-            l3.apply_event(
-                reference_book, event, reconstructed.parameters["price_precision"]
-            )
+        # All grid inputs must exist before the first eligible historical event.
+        reference_book = reconstructed.book
         reference_book.check_invariants()
         best_bid, best_ask = reference_book.best_prices()
         if best_bid is None or best_ask is None:
@@ -607,7 +635,7 @@ class BacktestService:
         cache: dict[str, Any],
         summary_path: Path,
     ) -> dict[str, int]:
-        """Reconstruct only the first interval block for UI reference data."""
+        """Use the verified state before the first eligible historical block."""
         if name in self._start_markets:
             return self._start_markets[name]
         validation = strategy.verify_validation_summary(summary_path)
@@ -621,14 +649,6 @@ class BacktestService:
             raise RuntimeError("the validated event path must stay inside its interval directory")
         book = deserialize_book(cache["book"])
         price_precision = int(cache["parameters"]["price_precision"])
-        with event_path.open(encoding="utf-8") as source:
-            for line in source:
-                payload = json.loads(line)
-                block_number = int(payload["block_number"])
-                if block_number > from_block:
-                    break
-                if block_number == from_block:
-                    l3.apply_event(book, l3.decode_event(payload), price_precision)
         book.check_invariants()
         best_bid, best_ask = book.best_prices()
         if best_bid is None or best_ask is None:
@@ -638,14 +658,6 @@ class BacktestService:
             "best_bid_price_raw": best_bid,
             "best_ask_price_raw": best_ask,
         }
-        validation_rows_path = summary_path.parent / "validation_rows.json"
-        if validation_rows_path.is_file():
-            rows = json.loads(validation_rows_path.read_text(encoding="utf-8"))
-            first = next((item for item in rows if int(item["block_number"]) == from_block), None)
-            if first is not None:
-                checked_raw = int(Decimal(str(first["reconstructed_midpoint"])) * price_precision)
-                if checked_raw != value["reference_price_raw"]:
-                    raise RuntimeError("the first-block reference midpoint does not match the validated report")
         self._start_markets[name] = value
         return value
 
@@ -705,6 +717,11 @@ class BacktestService:
         }
 
     def normalize_request(self, request: dict[str, Any], data: IntervalData) -> tuple[dict[str, Any], dict[str, Any]]:
+        removed = {"inclusion_delay_blocks", "max_transaction_participation_percent",
+                   "maker_fee_bps", "fixed_action_fee", "material_impact_threshold_percent"} & request.keys()
+        if removed:
+            raise BacktestInputError("Simulation controls are no longer position inputs.",
+                                     code="unsupported_simulation_settings", details={"fields": sorted(removed)})
         if str(request.get("engine")) != "kuru_lp":
             raise BacktestInputError("engine must be kuru_lp")
         market = str(request.get("market", "")).lower()
@@ -788,18 +805,12 @@ class BacktestService:
         driver = str(request.get("amount_driver", "both"))
         if driver not in {"both", "base", "quote"}:
             raise BacktestInputError("amount driver must be both, base, or quote")
-        inclusion_delay = int(request.get("inclusion_delay_blocks", 1))
-        if inclusion_delay < 1:
-            raise BacktestInputError("inclusion delay must be at least one block")
-        participation_value = request.get("max_transaction_participation_percent", 10)
-        participation = None if participation_value is None else decimal_text(
-            participation_value, 4, "participation percentage"
-        )
-        if participation is not None and Decimal(participation) > Decimal("100"):
-            raise BacktestInputError("participation percentage must not exceed 100")
-        impact = decimal_text(request.get("material_impact_threshold_percent", 25), 4, "impact threshold")
-        fixed_action_cost = decimal_text(request.get("fixed_action_fee", 0), 6, "fixed action fee", positive=False)
-        maker_fee_bps = decimal_text(request.get("maker_fee_bps", 0), 4, "maker fee", positive=False)
+        rules = self.contract_rules(data)
+        inclusion_delay = 1
+        participation = None
+        impact = "25"
+        fixed_action_cost = "0"
+        maker_fee_bps = str(rules["parameters"]["maker_fee_bps"])
         best_ask = start_market["best_ask_price_raw"]
         normalized = {
             "engine": "kuru_lp",
@@ -827,6 +838,9 @@ class BacktestService:
             "material_impact_threshold_percent": impact,
             "fixed_action_fee": fixed_action_cost,
             "maker_fee_bps": maker_fee_bps,
+            "contract_rules_sha256": sha256_value(rules),
+            "reference_state_block": int(data.validation["interval"]["from_block"]) - 1,
+            "gas_included": False,
         }
         if data.generalized_range:
             normalized["from_block"] = int(data.validation["interval"]["from_block"])
@@ -893,6 +907,16 @@ class BacktestService:
             if normalize_grid(submitted_grid) != grid:
                 raise BacktestInputError("the submitted order grid does not match the canonical Kuru SDK grid")
             grid_validation = validate_sdk_grid(grid, data.parameters["min_size"])
+            rules = self.contract_rules(data)
+            import lp_contract_rules
+            try:
+                for order in grid["orders"]:
+                    lp_contract_rules.validate_initial_order(order["side"], int(order["price_raw"]),
+                        int(order["flip_price_raw"]), int(order["size_raw"]), data.parameters["tick_size"],
+                        data.parameters["min_size"], int(rules["parameters"]["max_size"]))
+            except ValueError as error:
+                if grid_validation["deployable"]:
+                    raise BacktestInputError(str(error), code="grid_contract_limits") from error
             if not grid_validation["deployable"]:
                 raise BacktestInputError(
                     "the generated grid contains an order below the market minimum size",
@@ -901,6 +925,16 @@ class BacktestService:
                 )
             if len(grid["orders"]) > 20_000:
                 raise BacktestInputError("the generated grid exceeds the 20,000-order safety limit")
+            mon_shortage = max(0, int(grid["required_mon_raw"]) - raw_amount(normalized["mon_amount"], BASE_DECIMALS))
+            usdc_shortage = max(0, int(grid["required_usdc_raw"]) - raw_amount(normalized["usdc_amount"], QUOTE_DECIMALS))
+            if mon_shortage or usdc_shortage:
+                raise BacktestInputError(
+                    "the deposits cannot fund the exact SDK grid after contract rounding; use Auto-fill amounts",
+                    code="grid_deposit_shortage",
+                    details={"required_mon_raw": grid["required_mon_raw"],
+                             "required_usdc_raw": grid["required_usdc_raw"],
+                             "mon_shortage_raw": str(mon_shortage), "usdc_shortage_raw": str(usdc_shortage)},
+                )
             positions = [
                 kuru_lp.LPPosition(
                     side=item["side"], price=int(item["price_raw"]),
@@ -929,6 +963,16 @@ class BacktestService:
                 max_transaction_participation_percent=(None if participation is None else Decimal(participation)),
                 material_impact_threshold_percent=Decimal(normalized["material_impact_threshold_percent"]),
                 min_size_raw=data.parameters["min_size"],
+                contract_rules=True,
+                tick_size_raw=data.parameters["tick_size"],
+                max_size_raw=int(rules["parameters"]["max_size"]),
+                base_decimals=data.parameters["base_decimals"],
+                quote_decimals=data.parameters["quote_decimals"],
+                price_precision_raw=data.parameters["price_precision"],
+                vault_best_bid_raw=(int(rules["vault_best_bid"])
+                    if int(rules.get("vault_bid_size", 0)) > 0 else 0),
+                vault_best_ask_raw=(int(rules["vault_best_ask"])
+                    if int(rules["vault_best_ask"]) != 2**256 - 1 and int(rules.get("vault_ask_size", 0)) > 0 else 0),
             )
             interval = data.validation["interval"]
             verified = {

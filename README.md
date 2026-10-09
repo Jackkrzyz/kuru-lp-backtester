@@ -273,6 +273,20 @@ This command requires passing named validation reports for `relatively_quiet`, `
 
 ## Run the frontend replay
 
+The current product runs Kuru LP only. The Advanced MM demo and advanced simulation controls have been removed. Configure the market, block range, shape, price range, spread, MON amount, and USDC amount.
+
+See [the current LP contract checks](LP_CONTRACT_PARITY.md) for corrections, test evidence, fixed replay assumptions, and known limits. Contract mechanics are checked; exact counterfactual trader behavior is not claimed.
+
+See [the cleanup review](CLEANUP_REVIEW.md) for current maintenance fixes and remaining risks. The [interval expansion plan](ANY_INTERVAL_PLAN.md) describes Trade-derived hourly candles and bounded on-demand L3 preparation. That preparation service is not implemented yet.
+
+Before the first run, capture the historical contract limits and rebates:
+
+```bash
+python prepare_lp_contract_rules.py
+```
+
+This bounded command reads the six existing checkpoints. Interactive runs use its local cache. The grid reference is the market state before the first selected block. Initial orders become eligible at the start of that block. Contract-created flips are available to later matching events without an extra block delay. There is no artificial participation cap. Gas is excluded from P&L. Material-impact warnings explain the limits of replaying unchanged historical trader activity.
+
 Build the compact client artifacts from the existing raw timelines:
 
 ```bash
@@ -293,7 +307,9 @@ If the browser runs on Windows and the server runs in WSL, WSL localhost forward
 python backtest_server.py --host 0.0.0.0 --port 8000
 ```
 
-Run `hostname -I` in WSL. Open `http://<first-wsl-address>:8000` in the Windows browser. Keep the server terminal open. Use `ss -ltnp | grep ':8000'` to find a process that still uses the port.
+The server prints complete access URLs with its detected IP addresses. Open the WSL IP URL in the Windows browser. The URL sets a private browser access cookie. Keep the server terminal open. Use `ss -ltnp | grep ':8000'` to find a process that still uses the port.
+
+The server permits two active backtests by default. Use `--maximum-workers` to change this limit. Extra submissions receive HTTP 429. Server shutdown stops its active workers.
 
 The history chart is made from Trade events. Complete validated L3 coverage is continuous from block 109092028 through block 109142027. The API accepts any interval inside these inclusive bounds and rejects ranges outside local validated coverage. The old quiet, active, and directional names remain as convenient golden presets only.
 
@@ -305,7 +321,7 @@ HistoricalEventStore -> CheckpointStore -> ReconstructionEngine -> ReplayCursor 
 
 See [the general historical system guide](HISTORICAL_SYSTEM.md) for current coverage and indexing rules.
 
-The primary range inputs are percentages below and above the selected interval's first-block reconstructed midpoint. The UI calculates the absolute limits with integer math. It rounds the lower limit down to a tick and the upper limit up to a tick. It shows the reference midpoint and final absolute limits. Advanced simulation settings can use direct absolute limits.
+The primary range inputs are percentages below and above the midpoint immediately before the selected interval. The UI calculates the absolute limits with integer math. It rounds the lower limit down to a tick and the upper limit up to a tick. It shows the reference midpoint and final absolute limits. The range can also be entered as absolute prices.
 
 The API uses isolated local jobs. `POST /api/backtests` returns a job ID. The browser polls progress and gets the completed result from a separate endpoint. You can cancel a queued, running, or stalled job. An old browser request cannot hold a global engine lock or replace a newer result.
 
@@ -332,7 +348,7 @@ Use `--interval relatively_quiet`, `--interval relatively_active`, or `--interva
 
 The LP form shows fee and flip spread as a percentage. The SDK adapter converts this value to the SDK `minFeesPps` unit. In SDK version `0.0.95`, 100 pps equals one basis point. Thus, 0.30 percent equals 3,000 pps.
 
-The same SDK order-grid object supplies the preview, the required MON and USDC amounts, and the orders submitted to the backtester. The backend creates the same grid again with the installed SDK and rejects a mismatch. The preview sorts all bid and ask levels by numeric price. Its bar height is quote notional (`base size × price`). The green line is the first-block reference midpoint. The prior reversed bid display was a chart-ordering defect. It was not an SDK distribution defect.
+The same SDK order-grid object supplies the preview, the required MON and USDC amounts, and the orders submitted to the backtester. The backend creates the same grid again with the installed SDK and rejects a mismatch. The preview sorts all bid and ask levels by numeric price. Its bar height is quote notional (`base size × price`) with contract integer rounding. The green line is the midpoint before the selected first block. The prior reversed bid display was a chart-ordering defect. It was not an SDK distribution defect.
 
 The UI compares every final SDK order size with the market `minSize` after all tick and decimal rounding. It shows the smallest order, the market minimum, the number of invalid orders, and the first invalid side and price. Invalid bars are amber. **Run backtest** stays disabled until the position has valid order sizes and sufficient entered deposits. The backend repeats the same raw-integer checks and returns a structured error if the submitted position is not deployable.
 
@@ -342,7 +358,7 @@ Edit either `MON amount` or `USDC amount` to make that token the position driver
 
 The initial user-provided flip orders must meet `minSize`. Kuru's contract can create a smaller internal paired flip from a small partial fill. Later partial fills add to that same paired order. The simulator keeps this contract exemption explicit and does not drop filled assets or create multiple dust orders.
 
-Select **Advanced MM Demo** to view the preserved cancel-and-replace engine's saved deterministic scenarios. Saved data is not a fallback for a Kuru LP run. The screen has no wallet connection and no live order execution. See [the product vertical-slice report](PRODUCT_VERTICAL_SLICE.md) and [the Kuru LP request path](BACKTEST_REQUEST_PATH.md).
+The screen runs only new Kuru LP simulations. The previous MM research code and reports remain as historical regression artifacts. The screen has no wallet connection and no live order execution. See [the Kuru LP request path](BACKTEST_REQUEST_PATH.md).
 
 To find another interval:
 

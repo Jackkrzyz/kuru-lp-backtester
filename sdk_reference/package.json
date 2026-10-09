@@ -12,6 +12,7 @@
     "test:adapter": "node test_browser_adapter.js"
   },
   "devDependencies": {
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "solc": "0.8.20"
   }
 }
