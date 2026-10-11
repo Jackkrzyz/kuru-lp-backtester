@@ -4,6 +4,13 @@ Date: 2026-10-10.
 
 ## Current follow-up — 2026-10-11
 
+After commit `dc8a924` was pushed, a separate
+[code review](reviews/2026-10-11_REVIEW.md) recorded job-state bugs, public
+hosting risks, and speed work. The review did not change runtime code or stop
+the active download. See the proposed
+[hosting plan](plans/HOSTING_AND_SUBMISSION.md) and
+[wallet execution plan](plans/WALLET_EXECUTION.md). Neither plan is implemented.
+
 The later UI and Data suite changes passed **259 tests and 12 subtests**. The
 LP page now uses a three-step flow, exact SDK range previews, manual token
 amounts, and visible historical prices and dates. The Data suite combines the

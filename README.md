@@ -144,5 +144,8 @@ capacity guarantees. See the [status performance report](docs/FULL_HISTORY.md#st
 - [Official SDK reference](docs/SDK_REFERENCE.md)
 - [LP contract behavior and limits](docs/LP_CONTRACT_PARITY.md)
 - [Cleanup results and remaining work](docs/MAINTENANCE.md)
+- [Post-push code review: bugs and speed work](docs/reviews/2026-10-11_REVIEW.md)
+- [Hosting and hackathon submission plan](docs/plans/HOSTING_AND_SUBMISSION.md)
+- [Wallet and LP execution plan](docs/plans/WALLET_EXECUTION.md)
 
 Historical results do not prove future fills or profit. Simulated orders do not change later historical taker behavior. The app reports transaction impact. Gas costs are excluded. See the contract guide for the exact tested scope.
