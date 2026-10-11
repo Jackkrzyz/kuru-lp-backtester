@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compact_replays import (
+from kuru_backtester.compact_replays import (
     build_compact_replay,
     build_compact_replay_from_records,
     canonical_json_bytes,

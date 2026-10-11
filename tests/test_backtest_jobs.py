@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from backtest_jobs import BacktestJobManager, JobError
-from backtest_service import canonical_bytes
+from kuru_backtester.server.backtest_jobs import BacktestJobManager, JobError
+from kuru_backtester.server import backtest_jobs
+from kuru_backtester.server.backtest_service import canonical_bytes
 
 
 def stored_status(run_id: str, token: str, status: str = "running") -> dict:
@@ -77,3 +80,50 @@ def test_detailed_fills_are_separate_and_hash_verified(tmp_path) -> None:
     (directory / "fills.json").write_text("[]")
     with pytest.raises(JobError, match="fill hash does not match"):
         manager.fills(run_id, token)
+
+
+def test_completion_can_remove_heartbeat_during_a_status_read(tmp_path, monkeypatch):
+    manager = BacktestJobManager(tmp_path)
+    run_id, token = "job-finish", "secret"
+    write_job(manager, run_id, stored_status(run_id, token))
+    heartbeat = tmp_path / "live.json"
+    heartbeat.write_text("{}")
+    monkeypatch.setattr(backtest_jobs, "live_status_path", lambda key: heartbeat)
+    original_read = Path.read_text
+
+    def finish_before_read(path, *args, **kwargs):
+        if path == heartbeat:
+            terminal = stored_status(run_id, token, "completed")
+            (tmp_path / run_id / "status.json").write_text(json.dumps(terminal))
+            heartbeat.unlink()
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", finish_before_read)
+    assert manager.status(run_id, token)["status"] == "completed"
+
+
+def test_worker_exit_cannot_overwrite_completed_status(tmp_path, monkeypatch):
+    manager = BacktestJobManager(tmp_path)
+    run_id, token = "job-exit", "secret"
+    write_job(manager, run_id, stored_status(run_id, token))
+    monkeypatch.setattr(backtest_jobs, "live_status_path", lambda key: tmp_path / "absent")
+
+    def finish_before_poll():
+        terminal = stored_status(run_id, token, "completed")
+        (tmp_path / run_id / "status.json").write_text(json.dumps(terminal))
+        return 0
+
+    manager._processes[run_id] = SimpleNamespace(poll=finish_before_poll, returncode=0)
+    assert manager.status(run_id, token)["status"] == "completed"
+    assert json.loads((tmp_path / run_id / "status.json").read_text())["status"] == "completed"
+
+
+def test_exit_without_terminal_status_is_still_a_failure(tmp_path, monkeypatch):
+    manager = BacktestJobManager(tmp_path)
+    run_id, token = "job-crash", "secret"
+    write_job(manager, run_id, stored_status(run_id, token))
+    monkeypatch.setattr(backtest_jobs, "live_status_path", lambda key: tmp_path / "absent")
+    manager._processes[run_id] = SimpleNamespace(poll=lambda: 1, returncode=1)
+    result = manager.status(run_id, token)
+    assert result["status"] == "failed"
+    assert "exited with code 1" in result["failure_reason"]

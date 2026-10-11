@@ -7,8 +7,8 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from l3_vertical_slice import L3Book, ReplayEvent
-from strategy_vertical_slice import (
+from kuru_backtester.engine.l3_vertical_slice import L3Book, ReplayEvent
+from kuru_backtester.engine.strategy_vertical_slice import (
     StrategyConfig,
     StrategyOrder,
     StrategyState,

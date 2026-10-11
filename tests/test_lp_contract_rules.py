@@ -4,10 +4,10 @@ from decimal import Decimal
 
 import pytest
 
-import kuru_lp as lp
-import l3_vertical_slice as l3
-import lp_contract_rules as rules
-from backtest_service import BacktestService, BacktestInputError
+from kuru_backtester.engine import kuru_lp as lp
+from kuru_backtester.engine import l3_vertical_slice as l3
+from kuru_backtester.engine import lp_contract_rules as rules
+from kuru_backtester.server.backtest_service import BacktestService, BacktestInputError
 
 
 def config(**changes):
@@ -117,8 +117,8 @@ def test_removed_simulation_settings_cannot_change_engine_rules():
 
 
 def test_backend_rejects_exact_grid_funding_shortage():
-    from backtest_service import canonical_sdk_grid
-    from golden_regression import base_request
+    from kuru_backtester.server.backtest_service import canonical_sdk_grid
+    from kuru_backtester.tools.golden_regression import base_request
     service = BacktestService()
     data = service.load_interval("relatively_active")
     request = {**base_request(), "interval": "relatively_active", "usdc_amount": "180"}
@@ -136,7 +136,7 @@ def test_backend_rejects_exact_grid_funding_shortage():
 ])
 def test_contract_rules_fail_closed_outside_verified_scope(monkeypatch, tmp_path, change, code):
     import json
-    import backtest_service
+    from kuru_backtester.server import backtest_service
     service = BacktestService()
     data = service.load_interval("relatively_active")
     payload = json.loads((backtest_service.ROOT / ".cache/lp_contract_rules.json").read_text())

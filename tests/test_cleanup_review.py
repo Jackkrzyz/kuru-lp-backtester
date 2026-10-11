@@ -10,14 +10,14 @@ import threading
 import pytest
 from eth_abi import encode
 
-import backtest_jobs
-from backtest_jobs import BacktestJobManager, JobError
-from backtest_service import atomic_write_bytes, decimal_text, raw_price_text
-from generate_trade_history_chart import build_chart, source_sha256
-from historical_system import CheckpointStore, HistoricalRangeError
-from index_history import EVENT_TOPICS, StagingPartition, run_index
-from discover_envio_intervals import DiscoveryError
-from rebuild_from_chain import DEPLOYMENT_BLOCK, market_parameters
+from kuru_backtester.server import backtest_jobs
+from kuru_backtester.server.backtest_jobs import BacktestJobManager, JobError
+from kuru_backtester.server.backtest_service import atomic_write_bytes, decimal_text, raw_price_text
+from kuru_backtester.tools.generate_trade_history_chart import build_chart, source_sha256
+from kuru_backtester.history.historical_system import CheckpointStore, HistoricalRangeError
+from kuru_backtester.history.index_history import EVENT_TOPICS, StagingPartition, run_index
+from kuru_backtester.history.discover_envio_intervals import DiscoveryError
+from kuru_backtester.engine.rebuild_from_chain import DEPLOYMENT_BLOCK, market_parameters
 
 
 @pytest.mark.parametrize("raw,precision,expected", [(10**9,10**8,"10"), (10**10,10**8,"100"), (2711150,10**8,"0.0271115"), (0,10**8,"0")])

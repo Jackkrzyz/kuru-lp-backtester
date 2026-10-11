@@ -10,9 +10,9 @@ import pytest
 from eth_abi import encode, decode
 from eth_utils import keccak
 
-import kuru_lp as lp
-import l3_vertical_slice as l3
-from backtest_service import resolve_node
+from kuru_backtester.engine import kuru_lp as lp
+from kuru_backtester.engine import l3_vertical_slice as l3
+from kuru_backtester.server.backtest_service import resolve_node
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -203,7 +203,7 @@ def test_sdk_grid_matches_contract_initial_orders_and_token_debits(support, shap
         actual = market.order(order_id)
         assert (actual[5], actual[1], actual[6], actual[7]) == (
             int(item["price"]), int(item["liquidity"]), int(item["flipPrice"]), side)
-    import lp_contract_rules as rules
+    from kuru_backtester.engine import lp_contract_rules as rules
     expected_quote = sum(rules.quote_raw(price, size, 10**8, 10**10, round_up=True)
                          for price, size, side in zip(prices, sizes, sides) if side)
     expected_base = sum(rules.base_raw(size, 10**10) for size, side in zip(sizes, sides) if not side)

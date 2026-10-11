@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal
 
-import backtest_service
+from kuru_backtester.server import backtest_service
 import pytest
 
 

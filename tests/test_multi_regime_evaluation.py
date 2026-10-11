@@ -6,7 +6,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from multi_regime_evaluation import (
+from kuru_backtester.legacy.multi_regime_evaluation import (
     default_config,
     require_evaluation_gates,
     write_comparison,

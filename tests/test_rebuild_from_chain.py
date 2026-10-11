@@ -6,7 +6,7 @@ from pathlib import Path
 
 from eth_abi import encode as abi_encode
 
-from rebuild_from_chain import (
+from kuru_backtester.engine.rebuild_from_chain import (
     EVENTS_BY_TOPIC,
     ReconstructionError,
     add_order,

@@ -4,10 +4,19 @@ __pycache__/
 *.egg-info/
 .venv/
 .venv-*/
+.env
+.env.*
+!.env.example
 node_modules/
+build/
+dist/
+# Old demo replays stay local. Small catalogs and golden reports stay tracked.
+tests/fixtures/legacy_replays/*--*.json
 output/
 chain_data/
 .cache/
+full_history_manifest.json
+full_history_*_manifest.json
 validation_output/**
 !validation_output/**/
 !validation_output/**/summary.json

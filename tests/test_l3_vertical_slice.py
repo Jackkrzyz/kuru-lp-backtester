@@ -4,13 +4,13 @@ import unittest
 
 from eth_abi import encode as abi_encode
 
-from l3_vertical_slice import (
+from kuru_backtester.engine.l3_vertical_slice import (
     L3Book,
     ReplayCursor,
     ReplayEvent,
     parity_report,
 )
-from rebuild_from_chain import EVENT_SPECS, ReconstructionError
+from kuru_backtester.engine.rebuild_from_chain import EVENT_SPECS, ReconstructionError
 
 
 OWNER = "0x0000000000000000000000000000000000000123"

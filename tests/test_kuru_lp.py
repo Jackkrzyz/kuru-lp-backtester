@@ -2,9 +2,9 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
-import kuru_lp as lp
-import l3_vertical_slice as l3
-import strategy_vertical_slice as mm
+from kuru_backtester.engine import kuru_lp as lp
+from kuru_backtester.engine import l3_vertical_slice as l3
+from kuru_backtester.engine import strategy_vertical_slice as mm
 
 
 FIXTURE = Path("sdk_reference/fixtures/concentrated_liquidity_v0_0_95.json")

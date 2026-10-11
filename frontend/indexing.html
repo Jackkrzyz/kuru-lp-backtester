@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kuru · HyperSync data flow</title><link rel="stylesheet" href="indexing.css">
+</head>
+<body>
+<main>
+  <section class="heading"><h1>Onchain history, reconstructed with Envio.</h1><div class="status" aria-live="polite"><span id="status-dot"></span><span id="phase">Connecting</span><span id="freshness"></span></div><p id="error" role="alert" hidden></p></section>
+  <section class="instrument" aria-label="Live historical data pipeline">
+    <div class="instrument-top"><span>MON / USDC</span><span id="scope">—</span></div>
+    <canvas id="flow" role="img" aria-label="Monad events flow through HyperSync to the local archive. The archive supplies Trade candles and L3 reconstruction. RPC checks verify reconstructed data."></canvas>
+    <div class="readout"><div><span id="downloaded">0</span><small>events recorded</small></div><div><span id="reconstructed">0</span><small>reconstructed</small></div><div><span id="validated">0</span><small>validated</small></div></div>
+    <div id="coverage" aria-label="Block coverage"></div>
+  </section>
+  <section class="lower"><div><p class="eyebrow">TRADE OHLC · 1H</p><div id="chart"></div></div><div><p class="eyebrow">EVENTS APPLIED</p><div id="events">—</div></div></section>
+  <footer><span>Live process data · no simulated activity</span><details><summary>Details</summary><div id="details"></div></details></footer>
+</main><script src="indexing.js"></script>
+</body></html>

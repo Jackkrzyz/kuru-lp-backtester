@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from analyze_l2 import best_price, build_metrics_frame
+from kuru_backtester.legacy.analyze_l2 import best_price, build_metrics_frame
 
 
 class BestPriceTests(unittest.TestCase):

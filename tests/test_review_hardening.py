@@ -8,12 +8,12 @@ from unittest.mock import Mock
 
 import pytest
 
-import backtest_jobs
-from backtest_jobs import BacktestJobManager, JobError
-from backtest_server import BacktestHandler
-from historical_system import HistoricalRangeError, ValidationLayer
-import promote_historical_partition as promotion
-import strategy_vertical_slice as strategy
+from kuru_backtester.server import backtest_jobs
+from kuru_backtester.server.backtest_jobs import BacktestJobManager, JobError
+from kuru_backtester.server.backtest_server import BacktestHandler
+from kuru_backtester.history.historical_system import HistoricalRangeError, ValidationLayer
+from kuru_backtester.history import promote_historical_partition as promotion
+from kuru_backtester.engine import strategy_vertical_slice as strategy
 
 
 def test_worker_limit_rejects_before_launch(tmp_path):

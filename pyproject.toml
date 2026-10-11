@@ -5,47 +5,29 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kuru-market-making-backtester"
 version = "0.1.0"
-description = "Download Kuru L2 snapshots and rebuild order-book history from Monad events."
+description = "Local historical reconstruction and Kuru concentrated-liquidity backtesting."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "eth-abi>=5,<6",
     "eth-hash[pycryptodome]>=0.7,<1",
     "eth-utils>=5,<6",
-    "matplotlib>=3.9,<4",
-    "pandas>=2.2,<4",
-    "pyarrow>=18,<26",
 ]
 
 [project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+reports = ["matplotlib>=3.9,<4", "pandas>=2.2,<4", "pyarrow>=18,<26"]
 contract-tests = [
     "eth-tester==0.13.0b1", "py-evm==0.12.1b1", "trie==3.1.0",
     "eth-account==0.13.7", "rlp==4.1.0", "hexbytes==1.3.1",
 ]
 
-[tool.setuptools]
-py-modules = [
-    "analyze_l2",
-    "backtest_jobs",
-    "backtest_server",
-    "backtest_service",
-    "backtest_worker",
-    "benchmark_lp",
-    "build_lp_frontend",
-    "compact_replays",
-    "discover_envio_intervals",
-    "discover_interval",
-    "l3_vertical_slice",
-    "multi_regime_evaluation",
-    "kuru_lp",
-    "lp_contract_rules",
-    "prepare_lp_contract_rules",
-    "historical_system",
-    "index_history",
-    "promote_historical_partition",
-    "reconstruction_validation_report",
-    "rebuild_from_chain",
-    "sdk_grid_broker",
-    "strategy_vertical_slice",
-]
+[project.scripts]
+kuru = "kuru_backtester.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["kuru_backtester*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 

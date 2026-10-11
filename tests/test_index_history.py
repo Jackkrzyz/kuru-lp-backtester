@@ -1,6 +1,6 @@
 import json
 
-from index_history import EVENT_TOPICS, LOG_FIELDS, StagingPartition, canonical_page_rows, index_query
+from kuru_backtester.history.index_history import EVENT_TOPICS, LOG_FIELDS, StagingPartition, canonical_page_rows, index_query
 
 
 def test_index_query_has_canonical_fields_and_filters():

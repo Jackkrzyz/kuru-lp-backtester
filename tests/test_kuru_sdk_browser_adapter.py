@@ -4,8 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from backtest_service import resolve_node
-from sdk_grid_broker import PersistentSdkProcess
+from kuru_backtester.server.backtest_service import resolve_node
+from kuru_backtester.server.sdk_grid_broker import PersistentSdkProcess
 
 
 ROOT = Path(__file__).resolve().parents[1]

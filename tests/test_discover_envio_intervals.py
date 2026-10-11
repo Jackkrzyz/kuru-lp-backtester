@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 
 from eth_abi import encode as abi_encode
 
-from discover_envio_intervals import (
+from kuru_backtester.history.discover_envio_intervals import (
     BLOCK_FIELDS,
     CACHE_SCHEMA_VERSION,
     LOG_FIELDS,
@@ -32,7 +32,7 @@ from discover_envio_intervals import (
     query_payload,
     select_intervals,
 )
-from rebuild_from_chain import EVENT_SPECS, MARKET_ADDRESS
+from kuru_backtester.engine.rebuild_from_chain import EVENT_SPECS, MARKET_ADDRESS
 
 
 OWNER = "0x0000000000000000000000000000000000000123"

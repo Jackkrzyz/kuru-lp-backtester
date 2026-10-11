@@ -6,7 +6,7 @@ import itertools
 
 import pytest
 
-from historical_system import (
+from kuru_backtester.history.historical_system import (
     CheckpointStore,
     HistoricalEventStore,
     HistoricalRangeError,

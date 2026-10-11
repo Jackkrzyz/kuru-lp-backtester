@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-import promote_historical_partition as promotion
+from kuru_backtester.history import promote_historical_partition as promotion
 import pytest
 
 

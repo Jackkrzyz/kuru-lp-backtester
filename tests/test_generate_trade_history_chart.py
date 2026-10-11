@@ -1,6 +1,6 @@
 import json
 
-from generate_trade_history_chart import build_chart, downsample_trades
+from kuru_backtester.tools.generate_trade_history_chart import build_chart, downsample_trades
 
 
 def test_downsample_is_bounded_and_keeps_ends():
