@@ -95,28 +95,20 @@ async function main() {
   }
   {
     const ctx = context();
-    const balancing = deferred();
-    const started = deferred();
-    let handler;
-    ctx.app.lastEditedToken = "quote";
-    ctx.app.generatedGrid = {};
-    ctx.$("auto-fill-amounts").addEventListener = (_name, callback) => { handler = callback; };
+    const handlers = {};
+    for (const id of ["mon-amount", "usdc-amount"]) ctx.$(id).addEventListener = (_name, callback) => { handlers[id] = callback; };
+    ctx.app.amountDriver = "both";
     ctx.markConfigurationChanged = () => ctx.app.requestGate.change();
-    ctx.sdkInput = () => ({});
-    ctx.KuruSdkAdapter = {
-      balanceQuoteDeposit: () => { started.resolve(); return balancing.promise; },
-      rawToDecimal: String,
-    };
     vm.createContext(ctx);
-    vm.runInContext(source.slice(source.indexOf('$("auto-fill-amounts").addEventListener'),
-      source.indexOf('$("use-minimum-amounts").addEventListener')), ctx);
-    const filling = handler();
-    await started.promise;
-    ctx.app.requestGate.change();
-    ctx.$("mon-amount").value = "new user amount";
-    balancing.resolve({ monAmountRaw: 3000n });
-    await filling;
-    assert.equal(ctx.$("mon-amount").value, "new user amount", "stale Auto-fill must not replace an edited amount");
+    vm.runInContext(source.slice(source.indexOf('$("mon-amount").addEventListener'),
+      source.indexOf('$("regime").addEventListener')), ctx);
+    ctx.$("mon-amount").value = "6400";
+    ctx.$("usdc-amount").value = "244.610955";
+    handlers["mon-amount"]();
+    handlers["usdc-amount"]();
+    assert.equal(ctx.$("mon-amount").value, "6400", "preview must not change entered MON");
+    assert.equal(ctx.$("usdc-amount").value, "244.610955", "preview must not change entered USDC");
+    assert.equal(ctx.app.amountDriver, "both");
   }
   process.stdout.write("Frontend asynchronous ownership tests passed.\n");
 }

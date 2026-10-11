@@ -134,9 +134,16 @@ class Progress:
             "reconstructed_block": configuration["from_block"] - 1,
             "validated_block": configuration["from_block"] - 1,
             "event_counts": {}, "coverage": [], "recent_candles": [],
+            "actions": [], "action_sequence": 0,
         }
 
     def update(self, *, force: bool = False, **values: Any) -> None:
+        phase = values.get("phase")
+        if phase and phase != self.value.get("phase"):
+            self.action("phase", phase=phase, partition=values.get("current_partition", self.value.get("current_partition")))
+        if values.get("l2_checks_current_partition", 0) > self.value.get("l2_checks_current_partition", 0):
+            self.action("l2_check", block=values.get("reconstructed_block"),
+                        checks=values["l2_checks_current_partition"], queue_invariants="pass", price_level_error_raw=0, aggregate_size_error_raw=0)
         self.value.update(values)
         now = time.monotonic()
         if force or now - self.last_write >= 0.5:
@@ -145,17 +152,29 @@ class Progress:
             atomic_json(self.path, self.value)
             self.last_write = now
 
+    def action(self, kind: str, **fields: Any) -> None:
+        """Bounded observational trace, not a market event or a strategy timeline."""
+        self.value["action_sequence"] += 1
+        self.value["actions"].append({"sequence": self.value["action_sequence"], "timestamp": time.time(), "kind": kind, **fields})
+        self.value["actions"] = self.value["actions"][-60:]
+
     def observe(self, item: dict[str, Any]) -> None:
         kind = item["kind"]
         if kind == "request":
             self.value["requests"] += 1
-            self.update(phase="downloading")
+            self.action(kind, **{key: value for key, value in item.items() if key != "kind"})
+            self.update(force=True, phase="downloading", current_request=item)
         elif kind == "response":
             self.value["decoded_response_bytes"] += item["decoded_response_bytes"]
-            self.update(rate_limit_headers=item["headers"], phase="downloading")
-        else:
+            self.action(kind, **{key: value for key, value in item.items() if key != "kind"})
+            self.update(force=True, rate_limit_headers=item["headers"], last_response=item)
+        elif kind == "page_committed":
+            self.action(kind, **{key: value for key, value in item.items() if key != "kind"})
+            self.update(force=True, last_committed_page=item)
+        elif kind == "rate_limit_wait":
             self.value["rate_limit_waits"] += 1
             self.value["rate_limit_wait_seconds"] += item["seconds"]
+            self.action(kind, seconds=item["seconds"], headers=item["headers"])
             self.update(force=True, phase="rate_limit_wait", retry_seconds=item["seconds"],
                         rate_limit_headers=item["headers"])
 

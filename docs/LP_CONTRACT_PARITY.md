@@ -49,7 +49,12 @@ The local EVM tests execute the unmodified historical implementation runtime whe
 
 An impact warning does not make a position invalid. It means unchanged historical trade behavior is a weak assumption for that result. No arbitrary cap is used to make this warning disappear.
 
-Auto-fill keeps the edited token deposit unchanged. If USDC is locked, it uses a deterministic integer search through the official SDK to find a MON-driven position that fits the USDC deposit after rounding. It does not change individual SDK orders. Use minimum valid amounts uses a MON-driven minimum search and the exact required USDC. The preview is regenerated after either action. The backend returns `grid_deposit_shortage` if the exact grid cannot be funded.
+Current UI update, 2026-10-11: enter MON and USDC manually. The UI shows the
+official SDK side minimums and the exact grid's funding requirements. Auto-fill
+and minimum-setting buttons were removed. Their research helpers and tests
+remain available internally. The backend returns `grid_deposit_shortage` if the
+exact grid cannot be funded. Historical browser checks below describe the
+earlier buttons, not the current product controls.
 
 ## Limits of an exact historical replay
 

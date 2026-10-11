@@ -61,6 +61,12 @@ The integration test also runs A a second time. The run ID, summary hash, timeli
 
 ## UI result safety
 
+The frontend uses three fading panels: time frame, position, and results. `frontend/workflow.js` rejects stale navigation transitions. It disables animation when the browser requests reduced motion.
+
+`frontend/price_range.js` handles only integer price-range controls. The draggable marker translates the bounds in whole ticks. Reset uses the selected period's reconstructed starting midpoint. The lower handles change each bound. Typed signed percentages are relative to that same midpoint. The controls never replace the historical price or SDK best ask. `sdkInput()` converts these controls to the existing backend percentage or absolute range format.
+
+The top preview and lower overview both draw the canonical SDK grid, sorted by price across both sides. Bar height is quote notional. Drag updates are debounced; handle release performs the full grid and minimum-position checks. Run submission still regenerates and validates the exact grid before sending it. No reconstruction or accounting code changed for this layout.
+
 Any Kuru LP field change clears the visible result and marks it stale. A request token includes the configuration revision. The browser ignores an old response after a newer request, field edit, or mode change. Backend errors stay visible. There is no LP demo fallback.
 
 An edited form also cancels its current job. The UI cannot use an old result for a new configuration. A local job has one of these states: `queued`, `running`, `completed`, `failed`, `canceled`, or `stalled`.
@@ -71,8 +77,11 @@ The product contains only Kuru LP. The old cancel-and-replace research artifacts
 
 The UI checks the exact SDK grid after a shape, range, fee, token amount, or interval change. It marks each below-minimum preview bar and disables **Run backtest**. It also shows the smallest order, market minimum, invalid count, first invalid side and price, and deposit shortages.
 
-**Auto-fill amounts** keeps the selected token amount and calculates the paired token ratio. **Use minimum valid amounts** searches the selected driver's raw integer amount. It doubles until the SDK grid passes, then binary-searches for the smallest passing amount. It regenerates the final result and checks that one raw unit less fails.
+The product uses manual token amounts (`amount_driver=both`). It does not change either entered deposit automatically. It shows minimums from the official SDK's `lpSummary`: ask liquidity converts from market size units to MON units; bid summary liquidity already uses USDC units. These are separate side minimums, not a balanced base-driven position search. SDK rounding can make the summary slightly lower than the amount needed for a passing grid. Exact grid checks and actual required deposits remain authoritative. The legacy integer minimum-search helper remains tested for research use, but no product button calls it.
 
 The contract checks `minSize` for each initial user-provided flip order. The contract's internal flip path does not repeat this check. A small partial fill can create one contract-valid internal paired order below `minSize`. Later partial fills add to that same order. The simulator records this state as an internal flip and never treats it as an invalid initial order.
 
-See `PERFORMANCE_DIAGNOSTIC_REPORT.md` for the large-grid benchmark, parity hashes, and browser verification.
+See the [historical performance report](archive/PERFORMANCE_DIAGNOSTIC_REPORT.md)
+for the large-grid benchmark and parity hashes. See the
+[current Data suite guide](FULL_HISTORY.md) for status-page performance and
+download controls. Download telemetry is separate from the backtest job path.

@@ -170,6 +170,7 @@ def run_index(
 ) -> None:
     cursor = int(partition.state["next_block"])
     while cursor < stop:
+        requested_cursor = cursor
         partition.state["next_block"] = cursor
         partition.save()
         result = client.query(
@@ -211,6 +212,17 @@ def run_index(
             "complete": cursor >= stop,
         })
         partition.save()
+        observer = getattr(client, "observer", None)
+        if observer:
+            names = {spec.topic: spec.name for spec in EVENT_SPECS}
+            counts: dict[str, int] = {}
+            for row in rows:
+                name = names.get(row["topic0"], "Unknown")
+                counts[name] = counts.get(name, 0) + 1
+            observer({"kind": "page_committed", "from_block": requested_cursor,
+                      "next_block": cursor, "page_events": len(rows), "new_events": added,
+                      "event_counts": counts, "stored_events": partition.state["event_count"],
+                      "committed_bytes": partition.events_path.stat().st_size})
         if progress_callback is not None:
             progress_callback(dict(partition.state))
         print(

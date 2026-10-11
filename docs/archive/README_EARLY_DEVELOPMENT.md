@@ -2,6 +2,11 @@
 
 > Historical development record. Some settings, commands, and results describe earlier engines. See the [current project guide](../../README.md) and [LP contract checks](../LP_CONTRACT_PARITY.md) before using this document.
 
+> Archive notice checked 2026-10-11: the current UI has Kuru LP only, manual
+> token amounts, and a separate Data suite. Old MM demos, participation controls,
+> auto-fill buttons, and early root-script paths below are not current product
+> instructions. The recorded historical results remain unchanged.
+
 ## Documentation map
 
 - [Codebase guide](CODEBASE_GUIDE.md): module ownership, units, ordering, invariants, strategy rules, and test coverage.

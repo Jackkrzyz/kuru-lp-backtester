@@ -52,8 +52,11 @@ The adapter also owns these product checks:
 - percentage ranges use the reconstructed midpoint before the selected first block;
 - the lower bound rounds down to a tick and the upper bound rounds up;
 - every final SDK order is compared with `minSize` after all integer rounding;
-- the minimum viable position uses a doubling search and raw-integer binary search;
-- the final passing grid is regenerated, and one driver raw unit less must fail.
+- manual MON and USDC amounts use the SDK `lpSummary` side minimums, plus the
+  exact generated grid's funding and size checks;
+- the retained research minimum-search helper uses a doubling search and
+  raw-integer binary search; its final grid and one-unit-below case are tested,
+  but the current UI has no auto-fill or minimum-setting buttons.
 
 No local distribution formula is used without parity against SDK output.
 
@@ -61,7 +64,7 @@ No local distribution formula is used without parity against SDK output.
 
 ```bash
 cd sdk_reference
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npm run fixtures
 npm run build:browser
 npm run test:adapter

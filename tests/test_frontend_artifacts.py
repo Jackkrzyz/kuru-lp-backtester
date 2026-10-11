@@ -3,6 +3,7 @@
 import json
 import unittest
 from decimal import Decimal
+from html.parser import HTMLParser
 from pathlib import Path
 
 
@@ -11,6 +12,39 @@ DATA = ROOT / "tests" / "fixtures" / "legacy_replays"
 
 
 class FrontendArtifactTests(unittest.TestCase):
+    def test_data_diagram_and_trace_share_one_panel(self) -> None:
+        class PanelParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.sections = []
+                self.panels = []
+                self.ids = []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "section":
+                    panel = {"classes": attrs.get("class", "").split(), "ids": []}
+                    self.sections.append(panel)
+                    self.panels.append(panel)
+                if "id" in attrs:
+                    self.ids.append(attrs["id"])
+                    for panel in self.sections:
+                        panel["ids"].append(attrs["id"])
+
+            def handle_endtag(self, tag):
+                if tag == "section":
+                    self.sections.pop()
+
+        parser = PanelParser()
+        parser.feed((ROOT / "frontend" / "indexing.html").read_text(encoding="utf-8"))
+        panels = [p for p in parser.panels if "instrument" in p["classes"]]
+        self.assertEqual(len(panels), 1)
+        self.assertIn("chain-map", panels[0]["classes"])
+        for element in ("flow-title", "current-action", "action-explanation", "action-trace",
+                        "downloaded", "reconstructed", "validated", "coverage", "page-inspector"):
+            self.assertIn(element, panels[0]["ids"])
+        self.assertEqual(len(parser.ids), len(set(parser.ids)), "Duplicate IDs break status updates")
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.catalog = json.loads((DATA / "catalog.json").read_text(encoding="utf-8"))
@@ -95,8 +129,8 @@ class FrontendArtifactTests(unittest.TestCase):
             "flip-spread",
             "mon-amount",
             "usdc-amount",
-            "auto-fill-amounts",
-            "use-minimum-amounts",
+            "minimum-mon",
+            "minimum-usdc",
             "distribution-chart",
             "smallest-order",
             "market-minimum-order",
@@ -112,7 +146,10 @@ class FrontendArtifactTests(unittest.TestCase):
         self.assertIn("KuruSdkAdapter.generateOrderGrid", javascript)
         self.assertIn("KuruSdkAdapter.percentagePriceBounds", javascript)
         self.assertIn("KuruSdkAdapter.validateOrderGrid", javascript)
-        self.assertIn("KuruSdkAdapter.findMinimumViablePosition", javascript)
+        self.assertNotIn('id="auto-fill-amounts"', html)
+        self.assertNotIn('id="use-minimum-amounts"', html)
+        self.assertIn('amountDriver: "both"', javascript)
+        self.assertIn("KuruSdkAdapter.minimumDepositSummary", javascript)
         self.assertIn("KuruSdkAdapter.serializeOrderGrid", javascript)
         self.assertIn('fetch("/api/backtests"', javascript)
         self.assertIn("pollBacktestJob", javascript)

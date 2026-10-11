@@ -142,6 +142,10 @@ async function generateOrderGrid(input) {
     marketMinSizeRaw: config.minSize,
     minSizeError: Boolean(batch.minSizeError),
     orders,
+    // SDK summary asks use sizePrecision; bids already use quote-token units.
+    // This is display metadata only, never a replacement execution grid.
+    sdkMinimumMonRaw: result.lpSummary.baseLiquidity * 10n ** config.baseAssetDecimals / config.sizePrecision,
+    sdkMinimumUsdcRaw: result.lpSummary.quoteLiquidity,
     ...required,
   };
 }
@@ -165,6 +169,15 @@ function validateOrderGrid(grid, minSizeRaw = grid.marketMinSizeRaw) {
     offendingOrder: invalidOrders[0] || null,
     invalidOrders,
   };
+}
+
+async function minimumDepositSummary(input, grid) {
+  // The SDK cannot scale an all-zero side. Use a positive reporting-only
+  // seed in that case. Never change the entered deposits or execution grid.
+  const source = grid.sdkMinimumMonRaw > 0n && grid.sdkMinimumUsdcRaw > 0n
+    ? grid
+    : await generateOrderGrid({ ...input, driver: "both", monAmount: "1000000", usdcAmount: "1000000" });
+  return { minimumMonRaw: source.sdkMinimumMonRaw, minimumUsdcRaw: source.sdkMinimumUsdcRaw };
 }
 
 async function findMinimumViablePosition(input, selectedDriver = input.driver) {
@@ -294,6 +307,7 @@ module.exports = {
   requiredAmounts,
   generateOrderGrid,
   validateOrderGrid,
+  minimumDepositSummary,
   findMinimumViablePosition,
   balanceQuoteDeposit,
   serializeOrderGrid,

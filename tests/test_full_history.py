@@ -71,6 +71,24 @@ def test_partition_plan_is_bounded_and_inclusive():
             list(history.partitions(*args))
 
 
+def test_action_trace_reports_real_pages_and_is_bounded(tmp_path):
+    progress = history.Progress(tmp_path / "progress.json", {"from_block": 10, "to_block": 20})
+    progress.observe({"kind": "request", "from_block": 10, "to_block_exclusive": 21, "lookup_only": False})
+    progress.observe({"kind": "response", "headers": {}, "decoded_response_bytes": 100, "log_count": 3, "block_count": 2, "next_block": 21})
+    progress.observe({"kind": "page_committed", "next_block": 21, "page_events": 3, "new_events": 3, "event_counts": {"Trade": 1, "OrderCreated": 2}})
+    saved = json.loads(progress.path.read_text())
+    assert saved["last_response"]["log_count"] == 3
+    assert saved["last_committed_page"]["event_counts"] == {"Trade": 1, "OrderCreated": 2}
+    assert saved["validated_events"] == 0
+    progress.observe({"kind": "rate_limit_wait", "seconds": 3, "headers": {"Retry-After": "3"}})
+    assert progress.value["phase"] == "rate_limit_wait"
+    assert progress.value["rate_limit_waits"] == 1
+    for _ in range(100):
+        progress.observe({"kind": "request", "from_block": 10, "to_block_exclusive": 21})
+    assert len(progress.value["actions"]) == 60
+    assert progress.value["actions"][-1]["sequence"] > 100
+
+
 def test_interrupted_page_recovery_and_identity(tmp_path):
     signature = {"from_block": 10, "to_block": 20}
     partition = history.DurablePartition(tmp_path, signature)

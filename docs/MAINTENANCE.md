@@ -2,6 +2,21 @@
 
 Date: 2026-10-10.
 
+## Current follow-up — 2026-10-11
+
+The later UI and Data suite changes passed **259 tests and 12 subtests**. The
+LP page now uses a three-step flow, exact SDK range previews, manual token
+amounts, and visible historical prices and dates. The Data suite combines the
+Envio flow diagram, progress trace, coverage, storage totals, and bounded
+download controls.
+
+The status-page correction moved storage scans to one background thread,
+reduced duplicate file-status calls, separated scan and job locks, and handled
+closed HTTP connections. Real local status requests took 15–22 ms during a
+scan. No engine rules changed. See [the current history guide](FULL_HISTORY.md)
+for the test commands, measurements, and restart instructions. The dated
+cleanup results below remain a record of that earlier milestone.
+
 ## Project organization
 
 - Moved 26 Python modules into `kuru_backtester/`, grouped by engine, history, server, tools, and legacy work.

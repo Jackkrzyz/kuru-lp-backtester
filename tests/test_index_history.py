@@ -35,3 +35,25 @@ def test_page_rows_use_transaction_order_and_timestamp_map():
     rows = canonical_page_rows(result, "0xabc", lambda block: 0)
     assert [item["transaction_index"] for item in rows] == [1, 3]
     assert rows[0]["block_timestamp"] == 100
+
+
+def test_commit_telemetry_does_not_change_event_file_or_cursor(tmp_path):
+    from kuru_backtester.history.index_history import run_index
+    from kuru_backtester.history.discover_envio_intervals import RateLimitedHyperSyncClient
+    from kuru_backtester.engine.rebuild_from_chain import EVENT_SPECS
+    spec = EVENT_SPECS[0]
+    response = {"next_block": 20, "data": [{"blocks": [{"number": 12, "timestamp": 100}], "logs": [
+        {"address": "0xabc", "block_number": 12, "transaction_hash": "0x1", "transaction_index": 0, "log_index": 0, "topic0": spec.topic, "data": "0x"}]}]}
+    traces, paths = [], []
+    for label, observer in (("plain", None), ("trace", traces.append)):
+        client = RateLimitedHyperSyncClient("test://source", "test-token", http_post=lambda payload: (response, {}), observer=observer)
+        partition = StagingPartition(tmp_path / label, {"from_block": 10, "to_block": 19})
+        run_index(client, partition, "0xabc", 20)
+        paths.append(partition.events_path)
+        assert partition.state["next_block"] == 20
+    assert paths[0].read_bytes() == paths[1].read_bytes()
+    commit = next(item for item in traces if item["kind"] == "page_committed")
+    assert commit["from_block"] == 10
+    assert commit["next_block"] == 20
+    assert commit["event_counts"] == {spec.name: 1}
+    assert commit["new_events"] == 1

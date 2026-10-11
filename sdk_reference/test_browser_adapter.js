@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fixture = require("./fixtures/concentrated_liquidity_v0_0_95.json");
 const adapter = require("./browser_adapter");
+const { PositionViewer } = require("@kuru-labs/kuru-sdk");
 
 const input = {
   minimumPrice: "0.0263",
@@ -42,6 +43,15 @@ async function main() {
 
   for (const shape of ["spot", "curve", "bid_ask"]) {
     const grid = await adapter.generateOrderGrid({ ...input, shape });
+    const method = { spot: "getSpotBatchLPDetails", curve: "getCurveBatchLPDetails", bid_ask: "getBidAskBatchLPDetails" }[shape];
+    const official = await PositionViewer[method](
+      adapter.percentToPps(input.feePercent), adapter.decimalToRaw(input.minimumPrice, 8), adapter.decimalToRaw(input.maximumPrice, 8),
+      BigInt(input.bestAskPriceRaw), BigInt(input.pricePrecision), BigInt(input.sizePrecision), BigInt(input.quoteAssetDecimals),
+      BigInt(input.baseAssetDecimals), BigInt(input.tickSize), BigInt(input.minSize), adapter.decimalToRaw(input.usdcAmount, 6), adapter.decimalToRaw(input.monAmount, 18),
+    );
+    assert.equal(grid.sdkMinimumMonRaw, official.lpSummary.baseLiquidity * 10n ** 18n / BigInt(input.sizePrecision), `${shape} official MON minimum and token units`);
+    assert.equal(grid.sdkMinimumUsdcRaw, official.lpSummary.quoteLiquidity, `${shape} official USDC minimum`);
+    if (shape === "spot") assert.equal(grid.sdkMinimumMonRaw, BigInt(grid.orders.filter((order) => order.side === "sell").length) * BigInt(input.minSize) * 10n ** 18n / BigInt(input.sizePrecision));
     const expected = expectedOrders(shape);
     assert.equal(grid.orders.length, expected.length, `${shape} order count`);
     grid.orders.forEach((order, index) => {
@@ -71,6 +81,21 @@ async function main() {
   }
 
   const quoteDriven = await adapter.generateOrderGrid({ ...input, shape: "spot", driver: "quote" });
+  const screenshot = await adapter.generateOrderGrid({ ...input, shape: "spot", minimumPrice: "0.024926", maximumPrice: "0.025047",
+    bestAskPriceRaw: "2498300", feePercent: "0.01", monAmount: "4203.09373367544", usdcAmount: "244.610955" });
+  assert.equal(screenshot.orders.filter((order) => order.side === "sell").length, 32);
+  assert.equal(screenshot.sdkMinimumMonRaw, adapter.decimalToRaw("6400", 18), "32 Spot asks require the SDK minimum of 6,400 MON");
+  assert.equal(adapter.validateOrderGrid(screenshot).deployable, false, "entered 4,203 MON must not pass a 32-ask grid");
+  for (const shape of ["spot", "curve", "bid_ask"]) {
+    const zeroInput = { ...input, shape, monAmount: "0", usdcAmount: "0" };
+    const empty = await adapter.generateOrderGrid(zeroInput);
+    const before = adapter.serializeOrderGrid(empty);
+    const minimum = await adapter.minimumDepositSummary(zeroInput, empty);
+    assert(minimum.minimumMonRaw > 0n && minimum.minimumUsdcRaw > 0n, `${shape} zero deposits still show minimums`);
+    assert.deepEqual(adapter.serializeOrderGrid(empty), before, "minimum display must not resize orders");
+    assert.equal(zeroInput.monAmount, "0");
+    assert.equal(zeroInput.usdcAmount, "0");
+  }
   const baseDriven = await adapter.generateOrderGrid({ ...input, shape: "spot", driver: "base" });
   assert(quoteDriven.requiredMonRaw > 0n);
   assert(baseDriven.requiredUsdcRaw > 0n);

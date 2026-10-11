@@ -43,6 +43,27 @@ MAX_COMPACT_FRAMES = 1_500
 SEMANTIC_TIMELINE_SCHEMA_VERSION = "1.0"
 
 
+def period_trade_prices(events: Any) -> dict[str, str | None]:
+    """Display prices from all local Trades, not downsampled chart points.
+
+    Trade ABI prices use 1e18 units, independently of market tick precision.
+    This read-only summary does not reconstruct or simulate a new book.
+    """
+    closing = high = low = None
+    for event in events:
+        if event.name != "Trade":
+            continue
+        value = int(event.args["price"])
+        closing = value
+        high = value if high is None else max(high, value)
+        low = value if low is None else min(low, value)
+
+    def price_text(value: int | None) -> str | None:
+        return None if value is None else format(Decimal(value) / Decimal(10**18), "f")
+
+    return {"ending_price": price_text(closing), "highest_price": price_text(high), "lowest_price": price_text(low)}
+
+
 class BacktestInputError(ValueError):
     """Report an invalid request with data that the UI can show."""
 
@@ -714,6 +735,7 @@ class BacktestService:
                 start["reference_price_raw"], data.parameters["price_precision"]
             ),
             **data.parameters,
+            "trade_price_statistics": period_trade_prices(data.events),
         }
 
     def normalize_request(self, request: dict[str, Any], data: IntervalData) -> tuple[dict[str, Any], dict[str, Any]]:

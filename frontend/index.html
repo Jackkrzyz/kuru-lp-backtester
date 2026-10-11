@@ -1,115 +1,77 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Deterministic Kuru concentrated-liquidity backtest replay" />
-    <title>Kuru Market Lab</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <div class="app-shell">
-      <aside class="control-panel">
-        <div class="brand-row">
-          <div class="brand-mark">K</div>
-          <div>
-            <div class="eyebrow">Kuru Market Lab</div>
-            <h1>Backtest replay</h1>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Historical Kuru concentrated-liquidity backtesting" />
+  <title>Kuru · LP lab</title>
+  <link rel="stylesheet" href="styles.css?v=period-stats-1" />
+</head>
+<body>
+  <main class="app-shell" data-stage="timeframe">
+    <div class="shell-heading"><a class="wordmark" href="/">kuru<span> / lp lab</span></a><a class="indexing-link" href="indexing.html">Data suite ↗</a></div>
+    <article class="workflow-card">
+      <nav class="step-nav" aria-label="Backtest steps">
+        <button type="button" class="step-button active" data-step="timeframe" data-navigate="timeframe" aria-current="step"><span>01</span> Time frame</button>
+        <i aria-hidden="true"></i>
+        <button type="button" class="step-button" data-step="strategy" data-navigate="strategy" disabled><span>02</span> Position</button>
+        <i aria-hidden="true"></i>
+        <button type="button" class="step-button" data-step="results" data-navigate="results" disabled><span>03</span> Results</button>
+      </nav>
+      <div id="impact-warning" class="impact-warning" role="alert" hidden></div>
+      <form id="backtest-form" novalidate>
+        <section id="step-timeframe" class="workflow-panel" aria-labelledby="timeframe-title">
+          <div class="step-heading"><h1 id="timeframe-title" tabindex="-1">Select Historical Period</h1></div>
+          <div class="field-grid interval-fields">
+            <label><span>Market</span><input id="market" value="MON / USDC" readonly /></label>
+            <label><span>Period preset</span><select id="regime"><option value="relatively_active">Relatively active</option><option value="relatively_quiet">Relatively quiet</option><option value="directional">Directional move</option></select></label>
           </div>
-        </div>
-
-        <div class="scope-note">Verified historical results. No wallet. No live orders.</div>
-        <a href="indexing.html">View HyperSync indexing progress</a>
-
-        <form id="backtest-form">
-          <label>
-            <span>Market</span>
-            <input id="market" value="MON / USDC" readonly />
-          </label>
-          <label>
-            <span>Golden range preset</span>
-            <select id="regime">
-              <option value="relatively_active">Relatively active</option>
-              <option value="relatively_quiet">Relatively quiet</option>
-              <option value="directional">Directional move</option>
-            </select>
-          </label>
           <section class="history-range-card" aria-labelledby="history-range-title">
-            <div class="preview-heading">
-              <strong id="history-range-title">Local Trade history</strong>
-              <span id="range-coverage-status">Loading</span>
-            </div>
-            <canvas id="history-range-chart" height="105" aria-label="Trade price history and validated L3 coverage"></canvas>
-            <div class="range-sliders">
-              <input id="range-start-slider" type="range" aria-label="Start block selector" />
-              <input id="range-end-slider" type="range" aria-label="End block selector" />
-            </div>
-            <div class="field-grid range-block-fields">
-              <label><span>From block</span><input id="from-block" type="number" step="1" /></label>
-              <label><span>To block</span><input id="to-block" type="number" step="1" /></label>
-            </div>
-            <p id="history-scope-note" class="simulator-note">Trade-only chart regions are not backtestable without validated L3 coverage.</p>
+            <div class="preview-heading"><strong id="history-range-title">MON / USDC</strong><span id="range-coverage-status">Loading history</span></div>
+            <canvas id="history-range-chart" height="210" aria-label="Trade prices and validated historical coverage"></canvas>
+            <div class="range-sliders history-sliders"><input id="range-start-slider" type="range" aria-label="Period start" /><input id="range-end-slider" type="range" aria-label="Period end" /></div>
+            <div class="period-readout"><span id="period-start-time">—</span><span id="period-end-time">—</span></div>
           </section>
+          <div class="period-summary" aria-live="polite"><div><span>Starting price</span><strong id="period-start-price">Loading…</strong></div><div><span>Ending price</span><strong id="period-end-price">—</strong></div><div><span>Highest price</span><strong id="period-high-price">—</strong></div><div><span>Lowest price</span><strong id="period-low-price">—</strong></div><div><span>Volume</span><strong class="pending-volume">Not implemented</strong></div></div>
+          <p class="price-basis">Start: reconstructed midpoint. End, high, low: Trade prices. Dates: UTC.</p>
+          <div class="field-grid range-block-fields"><label><span>From block</span><input id="from-block" type="number" step="1" /></label><label><span>To block</span><input id="to-block" type="number" step="1" /></label></div>
+          <button id="timeframe-next" class="primary-button" type="button" disabled>Build your position <span aria-hidden="true">→</span></button>
+        </section>
+        <section id="step-strategy" class="workflow-panel" aria-labelledby="strategy-title" hidden>
+          <div class="step-heading"><div class="eyebrow">Kuru liquidity</div><h1 id="strategy-title" tabindex="-1">Give your capital a shape.</h1><p>Set your range. See the exact position before it trades.</p></div>
           <div id="lp-controls">
-            <label><span>Liquidity shape</span><select id="liquidity-shape"><option value="spot">Spot</option><option value="curve">Curve</option><option value="bid_ask">Bid-Ask</option></select></label>
-            <div class="field-grid">
-              <label><span>Lower range</span><span class="input-with-suffix"><input id="lower-range-percent" type="number" min="0" max="99.999999" step="0.01" value="3" inputmode="decimal" /><b>%</b></span></label>
-              <label><span>Upper range</span><span class="input-with-suffix"><input id="upper-range-percent" type="number" min="0" step="0.01" value="3" inputmode="decimal" /><b>%</b></span></label>
-              <div id="computed-range" class="computed-range wide">Reference — · Final range —</div>
-              <label><span>Fee / flip spread</span><span class="input-with-suffix"><input id="flip-spread" type="number" min="0.01" step="0.01" value="0.30" inputmode="decimal" /><b>%</b></span></label>
-              <label class="token-field"><span>MON amount <em id="mon-driver" class="driver-tag">drives grid</em></span><span class="input-with-suffix"><input id="mon-amount" type="number" min="0" step="any" value="2000" inputmode="decimal" /><b>MON</b></span><small id="mon-requirement" class="amount-status">Required — · Entered — · Shortage —</small></label>
-              <label class="wide token-field"><span>USDC amount <em id="usdc-driver" class="driver-tag active">drives grid</em></span><span class="input-with-suffix"><input id="usdc-amount" type="number" min="0" step="any" value="60" inputmode="decimal" /><b>USDC</b></span><small id="usdc-requirement" class="amount-status">Required — · Entered — · Shortage —</small></label>
-            </div>
-            <button id="auto-fill-amounts" class="secondary-button" type="button">Auto-fill amounts</button>
-            <p class="simulator-note">Auto-fill balances this simulated position. It does not perform a token swap.</p>
-            <button id="use-minimum-amounts" class="secondary-button" type="button" disabled>Use minimum valid amounts</button>
-            <p id="minimum-viable-position" class="simulator-note">Minimum viable MON — · Corresponding USDC —</p>
-            <section class="preview-card" aria-labelledby="preview-title">
-              <div class="preview-heading"><strong id="preview-title">Exact SDK position preview</strong><span id="preview-count">—</span></div>
-              <canvas id="distribution-chart" height="150" aria-label="Generated liquidity distribution"></canvas>
-              <div id="preview-detail" class="preview-detail">—</div>
-              <div class="grid-validation" aria-live="polite">
-                <div><span>Smallest order</span><strong id="smallest-order">—</strong></div>
-                <div><span>Market minimum</span><strong id="market-minimum-order">—</strong></div>
-                <div><span>Invalid orders</span><strong id="invalid-order-count">—</strong></div>
-                <div><span>First invalid</span><strong id="offending-order">—</strong></div>
-                <div><span>Deployable</span><strong id="deployable-status">Checking</strong></div>
-              </div>
+            <div class="field-grid strategy-fields"><label><span>Liquidity shape</span><select id="liquidity-shape"><option value="spot">Spot</option><option value="curve">Curve</option><option value="bid_ask">Bid-Ask</option></select></label><label><span>Fee / flip spread</span><span class="input-with-suffix"><input id="flip-spread" type="number" min="0.01" step="0.01" value="0.30" inputmode="decimal" /><b>%</b></span></label></div>
+            <section class="price-selection" aria-labelledby="preview-title">
+              <div class="preview-heading"><strong id="preview-title">Set price range</strong><button id="reset-price" class="reset-button" type="button">↺ Reset price</button></div>
+              <div class="range-chart-heading"><span class="token-pair"><i></i> MON <i></i> USDC</span><label class="center-price-field"><span>Range center</span><input id="range-center-price" inputmode="decimal" aria-label="Range center price" /></label></div>
+              <div class="distribution-wrap"><div class="distribution-legend"><span class="bid-label">Bids</span><span class="ask-label">Asks</span></div><canvas id="distribution-chart" height="205" aria-label="Exact SDK liquidity orders, height in quote notional"></canvas><button id="price-center-marker" class="price-center-marker" type="button" role="slider" aria-label="Drag range center" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span aria-hidden="true">↔</span></button></div>
+              <div class="range-overview"><canvas id="range-depth-chart" height="80" aria-label="Selected liquidity range overview"></canvas><div class="range-sliders price-sliders"><input id="price-min-slider" type="range" aria-label="Minimum price handle" /><input id="price-max-slider" type="range" aria-label="Maximum price handle" /></div></div>
+              <div class="price-fields"><label><span>Min price</span><span class="combined-price-input"><input id="minimum-price" value="0.0263" inputmode="decimal" aria-label="Minimum price" /><span><input id="lower-range-percent" type="number" step="0.01" value="-3" inputmode="decimal" aria-label="Minimum price offset from period start, percent" /><b>%</b></span></span></label><label><span>Max price</span><span class="combined-price-input"><input id="maximum-price" value="0.02795" inputmode="decimal" aria-label="Maximum price" /><span><input id="upper-range-percent" type="number" step="0.01" value="3" inputmode="decimal" aria-label="Maximum price offset from period start, percent" /><b>%</b></span></span></label><div class="order-count"><span>No. of orders</span><strong id="position-order-count">—</strong></div></div>
+              <input id="absolute-range-mode" type="checkbox" hidden />
+              <div id="absolute-range-fields" hidden></div>
+              <div id="computed-range" class="computed-range">Starting price — · Final range —</div><div id="preview-count" class="sr-only">—</div><div id="preview-detail" class="preview-detail" aria-live="polite">Loading the official SDK position.</div>
             </section>
+            <div class="field-grid deposit-fields"><label class="token-field"><span>MON amount <em id="mon-driver" class="driver-tag">drives grid</em></span><span class="input-with-suffix"><input id="mon-amount" type="number" min="0" step="any" value="2000" inputmode="decimal" /><b>MON</b></span><small id="mon-requirement" class="amount-status">Required — · Entered — · Shortage —</small><small id="minimum-mon" class="deposit-minimum">SDK minimum MON —</small></label><label class="token-field"><span>USDC amount <em id="usdc-driver" class="driver-tag">drives grid</em></span><span class="input-with-suffix"><input id="usdc-amount" type="number" min="0" step="any" value="60" inputmode="decimal" /><b>USDC</b></span><small id="usdc-requirement" class="amount-status">Required — · Entered — · Shortage —</small><small id="minimum-usdc" class="deposit-minimum">SDK minimum USDC —</small></label></div>
+            <p id="minimum-viable-position" class="simulator-note">Enter both amounts manually. Exact grid checks determine whether this position can run.</p>
+            <details class="grid-checks"><summary>Position checks <strong id="deployable-status">Checking</strong></summary><div class="grid-validation"><div><span>Smallest order</span><strong id="smallest-order">—</strong></div><div><span>Market minimum</span><strong id="market-minimum-order">—</strong></div><div><span>Invalid orders</span><strong id="invalid-order-count">—</strong></div><div><span>First invalid</span><strong id="offending-order">—</strong></div></div></details>
           </div>
-
-          <details class="price-settings">
-            <summary>Enter range as prices</summary>
-            <label class="checkbox-row"><input id="absolute-range-mode" type="checkbox" /><span>Enter absolute prices directly</span></label>
-            <div id="absolute-range-fields" class="field-grid" hidden>
-              <label><span>Minimum price</span><input id="minimum-price" value="0.0263" inputmode="decimal" /></label>
-              <label><span>Maximum price</span><input id="maximum-price" value="0.02795" inputmode="decimal" /></label>
-            </div>
-          </details>
-          <p class="simulator-note">Orders use the market state before the first selected block. Gas is excluded. Historical trades remain fixed; a large position can change real trading outcomes.</p>
-
-          <button class="run-button" type="submit">
-            <span id="run-button-label">Run backtest</span>
-            <span aria-hidden="true">→</span>
-          </button>
-          <button id="cancel-backtest" class="secondary-button" type="button" hidden>Cancel backtest</button>
-        </form>
-        <p id="form-help" class="form-help">Run a new local Kuru LP simulation with this exact SDK-generated position.</p>
-      </aside>
-
-      <main>
+          <div class="step-actions"><button class="back-button" type="button" data-navigate="timeframe">← Change period</button><button class="run-button primary-button" type="submit"><span id="run-button-label">Run backtest</span><span aria-hidden="true">→</span></button></div>
+          <div id="job-progress" class="job-progress" hidden><i></i></div><button id="cancel-backtest" class="secondary-button" type="button" hidden>Cancel backtest</button>
+          <p id="form-help" class="form-help">Historical simulation · gas excluded · no wallet or live orders.</p>
+        </section>
+      </form>
+      <section id="step-results" class="workflow-panel" aria-label="Backtest results" hidden>
         <header class="topbar">
           <div>
             <div id="engine-label" class="eyebrow">Kuru LP engine</div>
-            <h2 id="run-title">MON / USDC · Relatively active</h2>
+            <h2 id="run-title" tabindex="-1">MON / USDC · Relatively active</h2>
           </div>
           <div class="header-actions">
             <div id="scenario-badge" class="scenario-badge">Kuru LP</div>
-            <div id="status" class="status" role="status">No run yet</div>
+            <button class="secondary-button compact-button" type="button" data-navigate="strategy">Edit position ↗</button>
           </div>
         </header>
 
-        <div id="impact-warning" class="impact-warning" hidden></div>
 
         <section class="chart-card">
           <div class="chart-header">
@@ -155,12 +117,12 @@
               </div>
               <div id="result-state" class="result-state">Deterministic</div>
             </div>
-            <div id="run-identity" class="run-identity" hidden>
+            <details class="run-details"><summary>Run details</summary><div id="run-identity" class="run-identity" hidden>
               <div><span>Run ID</span><code id="run-id">—</code></div>
               <div><span>Normalized configuration</span><code id="normalized-config">—</code></div>
               <div><span>Hashes</span><code id="result-hashes">—</code></div>
             </div>
-            <div class="metric-grid">
+            </details><div class="metric-grid">
               <article class="metric primary"><span>Strategy P&amp;L</span><strong id="strategy-pnl">—</strong></article>
               <article class="metric"><span>Hold P&amp;L</span><strong id="hold-pnl">—</strong></article>
               <article class="metric"><span>Excess P&amp;L</span><strong id="excess-pnl">—</strong></article>
@@ -191,10 +153,16 @@
             </div>
           </div>
         </section>
-      </main>
-    </div>
-    <script src="kuru_sdk_adapter.js?v=lp-contract-18" defer></script>
-    <script src="request_gate.js" defer></script>
-    <script src="app.js?v=lp-contract-18" defer></script>
-  </body>
+
+      </section>
+      <footer class="workflow-footer"><span>Monad history · Kuru LP</span><span id="status" class="status" role="status" aria-live="polite">Loading local history</span></footer>
+    </article>
+    <p class="shell-note">A historical replay. Your position does not change the recorded market.</p>
+  </main>
+  <script src="kuru_sdk_adapter.js?v=manual-deposits-2" defer></script>
+  <script src="request_gate.js" defer></script>
+  <script src="price_range.js?v=metal-flow-1" defer></script>
+  <script src="workflow.js?v=metal-flow-1" defer></script>
+  <script src="app.js?v=period-stats-1" defer></script>
+</body>
 </html>

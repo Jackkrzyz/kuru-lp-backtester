@@ -25,11 +25,9 @@ const app = {
   cache: new Map(),
   generatedGrid: null,
   gridValidation: null,
-  minimumViablePosition: null,
   normalizedBounds: null,
   running: false,
-  amountDriver: "base",
-  lastEditedToken: "base",
+  amountDriver: "both",
   previewRevision: 0,
   requestGate: RunRequestGate.create(),
   orderState: new Map(),
@@ -38,6 +36,10 @@ const app = {
   requestController: null,
   frontendTimings: null,
   chartCache: new Map(),
+  priceSelection: null,
+  priceSelectionKey: null,
+  pricePreviewTimer: null,
+  workflow: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -66,21 +68,18 @@ function setSignedMetric(id, value) {
 function sdkInput() {
   const metadata = currentMetadata();
   if (!metadata) throw new Error("The selected block range metadata is not ready.");
-  const absoluteMode = $("absolute-range-mode").checked;
+  const lowerOffset = $("lower-range-percent").value;
+  const upperOffset = $("upper-range-percent").value;
+  const absoluteMode = $("absolute-range-mode").checked || Number(lowerOffset) > 0 || Number(upperOffset) < 0;
   const bounds = absoluteMode
     ? KuruSdkAdapter.absolutePriceBounds($("minimum-price").value, $("maximum-price").value, metadata.tick_size)
-    : KuruSdkAdapter.percentagePriceBounds(
-      metadata.reference_price_raw,
-      $("lower-range-percent").value,
-      $("upper-range-percent").value,
-      metadata.tick_size,
-    );
+    : KuruSdkAdapter.percentagePriceBounds(metadata.reference_price_raw, lowerOffset.replace(/^-/, ""), upperOffset.replace(/^\+/, ""), metadata.tick_size);
   const minimumPrice = KuruSdkAdapter.rawToDecimal(bounds.minimumPriceRaw, 8);
   const maximumPrice = KuruSdkAdapter.rawToDecimal(bounds.maximumPriceRaw, 8);
   app.normalizedBounds = {
     rangeMode: absoluteMode ? "absolute" : "percentage",
-    lowerRangePercent: absoluteMode ? null : $("lower-range-percent").value,
-    upperRangePercent: absoluteMode ? null : $("upper-range-percent").value,
+    lowerRangePercent: absoluteMode ? null : lowerOffset.replace(/^-/, ""),
+    upperRangePercent: absoluteMode ? null : upperOffset.replace(/^\+/, ""),
     referencePriceRaw: BigInt(metadata.reference_price_raw),
     minimumPriceRaw: bounds.minimumPriceRaw,
     maximumPriceRaw: bounds.maximumPriceRaw,
@@ -91,7 +90,7 @@ function sdkInput() {
     $("minimum-price").value = minimumPrice;
     $("maximum-price").value = maximumPrice;
   }
-  $("computed-range").textContent = `Reference ${formatRaw(metadata.reference_price_raw, 8, 8)} USDC · Final range ${minimumPrice}–${maximumPrice} USDC`;
+  $("computed-range").textContent = `Period start ${formatRaw(metadata.reference_price_raw, 8, 8)} USDC · Tick-rounded range ${minimumPrice}–${maximumPrice}`;
   return {
     shape: $("liquidity-shape").value,
     minimumPrice,
@@ -131,13 +130,109 @@ function prepareCanvas(canvas) {
   const ratio = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(260, rect.width);
-  const height = Math.max(100, rect.height);
+  const height = Math.max(40, rect.height);
   canvas.width = Math.round(width * ratio);
   canvas.height = Math.round(height * ratio);
   const context = canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
   return { context, width, height };
+}
+
+function syncPriceSelection() {
+  const metadata = currentMetadata();
+  const bounds = app.normalizedBounds;
+  const key = `${metadata.from_block}:${metadata.to_block}:${metadata.reference_price_raw}:${metadata.tick_size}`;
+  if (!app.priceSelection || app.priceSelectionKey !== key) {
+    app.priceSelection = new PriceRange.Selection(metadata.reference_price_raw, metadata.tick_size, bounds.minimumPriceRaw, bounds.maximumPriceRaw);
+    app.priceSelectionKey = key;
+  } else app.priceSelection.setBounds(bounds.minimumPriceRaw, bounds.maximumPriceRaw);
+  if (bounds.rangeMode === "absolute") {
+    $("lower-range-percent").value = (Number(bounds.minimumPriceRaw - bounds.referencePriceRaw) / Number(bounds.referencePriceRaw) * 100).toFixed(6);
+    $("upper-range-percent").value = (Number(bounds.maximumPriceRaw - bounds.referencePriceRaw) / Number(bounds.referencePriceRaw) * 100).toFixed(6);
+  }
+  renderPriceHandles();
+}
+
+function renderPriceHandles() {
+  const selection = app.priceSelection;
+  if (!selection) return;
+  const span = selection.domainMaximum - selection.domainMinimum;
+  [$("price-min-slider"), $("price-max-slider")].forEach((slider) => {
+    slider.min = "0";
+    slider.max = String(span);
+    slider.step = String(selection.tick);
+  });
+  $("price-min-slider").value = String(selection.minimum - selection.domainMinimum);
+  $("price-max-slider").value = String(selection.maximum - selection.domainMinimum);
+  const tracks = $("price-min-slider").parentElement;
+  tracks.style.setProperty("--range-start-percent", `${selection.fraction(selection.minimum) * 100}%`);
+  tracks.style.setProperty("--range-end-percent", `${selection.fraction(selection.maximum) * 100}%`);
+  $("range-center-price").value = KuruSdkAdapter.rawToDecimal(selection.center, 8);
+  const marker = $("price-center-marker");
+  marker.style.left = `${selection.fraction(selection.center) * 100}%`;
+  marker.setAttribute("aria-valuemin", KuruSdkAdapter.rawToDecimal(selection.domainMinimum, 8));
+  marker.setAttribute("aria-valuemax", KuruSdkAdapter.rawToDecimal(selection.domainMaximum, 8));
+  marker.setAttribute("aria-valuenow", KuruSdkAdapter.rawToDecimal(selection.center, 8));
+  marker.setAttribute("aria-valuetext", `Range center ${KuruSdkAdapter.rawToDecimal(selection.center, 8)} USDC. Period start ${KuruSdkAdapter.rawToDecimal(selection.reference, 8)} USDC.`);
+  $("reset-price").disabled = app.running;
+}
+
+function drawDistribution(grid, validation) {
+  if (!app.priceSelection) return;
+  const selection = app.priceSelection;
+  // Render the canonical SDK grid, sorted across both sides. Height is quote
+  // notional for both MON asks and USDC bids; never a separate shape formula.
+  const rows = [...grid.orders].sort((a, b) => a.price < b.price ? -1 : a.price > b.price ? 1 : 0);
+  const maxHeight = Math.max(1, ...rows.map((row) => Number(row.quoteNotionalRaw)));
+  const invalid = new Set(validation.invalidOrders.map((row) => `${row.side}:${row.priceRaw}`));
+  ["distribution-chart", "range-depth-chart"].forEach((id) => {
+    const { context, width, height } = prepareCanvas($(id));
+    const overview = id === "range-depth-chart";
+    const baseline = height - 22;
+    const plotHeight = baseline - 12;
+    const x = (raw) => selection.fraction(raw) * width;
+    const distinct = [...new Set(rows.map((row) => String(row.price)))];
+    const gaps = distinct.slice(1).map((raw, index) => x(raw) - x(distinct[index])).filter((gap) => gap > 0);
+    const barWidth = Math.max(1, Math.min(18, gaps.length ? Math.min(...gaps) * 0.86 : 12));
+    context.fillStyle = overview ? "rgba(255,135,74,.045)" : "rgba(255,255,255,.025)";
+    context.fillRect(x(selection.minimum), 0, x(selection.maximum) - x(selection.minimum), baseline);
+    rows.forEach((row) => {
+      const barHeight = Number(row.quoteNotionalRaw) / maxHeight * plotHeight;
+      context.fillStyle = invalid.has(`${row.side}:${row.price}`) ? "#ed8d8d" : overview ? "rgba(230,218,205,.18)" : row.side === "buy" ? "#8894ff" : "#f2aa79";
+      context.fillRect(x(row.price) - barWidth / 2, baseline - barHeight, barWidth, Math.max(1, barHeight));
+    });
+    context.strokeStyle = "rgba(240,226,213,.35)";
+    context.setLineDash([3, 4]);
+    context.beginPath(); context.moveTo(x(selection.reference), 0); context.lineTo(x(selection.reference), baseline); context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#a3978d";
+    context.font = "9px Inter, system-ui, sans-serif";
+    for (let index = 0; index <= 6; index += 1) {
+      const raw = selection.domainMinimum + (selection.domainMaximum - selection.domainMinimum) * BigInt(index) / 6n;
+      context.textAlign = index === 0 ? "left" : index === 6 ? "right" : "center";
+      context.fillText(KuruSdkAdapter.rawToDecimal(raw, 8), width * index / 6, height - 5);
+    }
+  });
+}
+
+function queuePricePreview({ final = false } = {}) {
+  clearTimeout(app.pricePreviewTimer);
+  if (final) renderDistributionPreview();
+  else app.pricePreviewTimer = setTimeout(() => renderDistributionPreview(), 120);
+}
+
+function useSelectionBounds({ final = false } = {}) {
+  const selection = app.priceSelection;
+  if (!selection) return;
+  $("absolute-range-mode").checked = true;
+  $("minimum-price").value = KuruSdkAdapter.rawToDecimal(selection.minimum, 8);
+  $("maximum-price").value = KuruSdkAdapter.rawToDecimal(selection.maximum, 8);
+  $("lower-range-percent").value = ((Number(selection.minimum - selection.reference) / Number(selection.reference)) * 100).toFixed(6);
+  $("upper-range-percent").value = ((Number(selection.maximum - selection.reference) / Number(selection.reference)) * 100).toFixed(6);
+  markConfigurationChanged();
+  renderPriceHandles();
+  queuePricePreview({ final });
 }
 
 function renderAmountStatus(grid) {
@@ -159,6 +254,14 @@ function setRunButtonState() {
   const canRun = app.mode !== "kuru_lp" || Boolean(app.gridValidation?.deployable);
   button.disabled = app.running || !canRun;
   $("run-button-label").textContent = app.running ? "Running backtest…" : "Run backtest";
+  const ready = Boolean(app.rangeMetadata)
+    && Number(app.rangeMetadata.from_block) === Number($("from-block").value)
+    && Number(app.rangeMetadata.to_block) === Number($("to-block").value);
+  $("timeframe-next").disabled = !ready || app.running;
+  document.querySelectorAll('[data-step="strategy"]').forEach((item) => { item.disabled = !ready || app.running; });
+  document.querySelectorAll('[data-step="results"]').forEach((item) => { item.disabled = !app.replay || app.running; });
+  document.querySelectorAll('[data-navigate="timeframe"]').forEach((item) => { item.disabled = app.running; });
+  $("reset-price").disabled = app.running || !app.priceSelection;
 }
 
 function renderGridValidation(validation, shortages) {
@@ -180,7 +283,7 @@ function renderGridValidation(validation, shortages) {
   setRunButtonState();
 }
 
-async function renderDistributionPreview({ searchMinimum = true } = {}) {
+async function renderDistributionPreview() {
   const revision = ++app.previewRevision;
   try {
     const input = sdkInput();
@@ -188,61 +291,40 @@ async function renderDistributionPreview({ searchMinimum = true } = {}) {
     if (revision !== app.previewRevision) return;
     app.generatedGrid = distribution;
     const validation = KuruSdkAdapter.validateOrderGrid(distribution, input.minSize);
+    syncPriceSelection();
+    drawDistribution(distribution, validation);
     const rows = distribution.orders;
-    const canvas = $("distribution-chart");
-    const { context, width, height } = prepareCanvas(canvas);
-    const maximum = Math.max(1, ...rows.map((item) => Number(item.quoteNotionalRaw)));
-    const start = Number(distribution.minimumPriceRaw);
-    const end = Number(distribution.maximumPriceRaw);
-    const xForPrice = (raw) => 8 + (Number(raw) - start) / Math.max(1, end - start) * (width - 16);
-    const barWidth = Math.max(2, (width - 16) / rows.length * 0.62);
-    const invalidKeys = new Set(validation.invalidOrders.map((item) => `${item.side}:${item.priceRaw}:${item.sizeRaw}`));
-    rows.forEach((item) => {
-      const x = xForPrice(item.price) - barWidth / 2;
-      const barHeight = Math.max(2, Number(item.quoteNotionalRaw) / maximum * (height - 31));
-      context.fillStyle = invalidKeys.has(`${item.side}:${item.price}:${item.liquidity}`)
-        ? "#f2b04f"
-        : (item.side === "buy" ? "#3978d4" : "#d05a61");
-      context.fillRect(x, height - 18 - barHeight, barWidth, barHeight);
-    });
-    const marketX = xForPrice(app.normalizedBounds.referencePriceRaw);
-    context.strokeStyle = "#a8d04a";
-    context.setLineDash([3, 3]);
-    context.beginPath(); context.moveTo(marketX, 7); context.lineTo(marketX, height - 17); context.stroke();
-    context.setLineDash([]);
-    context.fillStyle = "#82908d";
-    context.font = "9px Inter, system-ui, sans-serif";
-    context.fillText(`${Number(distribution.minimumPriceRaw) / 1e8}`, 7, height - 4);
-    const endText = `${Number(distribution.maximumPriceRaw) / 1e8}`;
-    context.fillText(endText, width - context.measureText(endText).width - 7, height - 4);
     const bidCount = rows.filter((item) => item.side === "buy").length;
     const askCount = rows.length - bidCount;
     $("preview-count").textContent = `${bidCount} bids · ${askCount} asks`;
-    $("preview-detail").textContent = `SDK ${distribution.source.version} · ${distribution.feePercent}% · bar height is quote notional · green marker is the pre-interval midpoint${validation.invalidOrderCount ? " · amber bars are below minSize" : ""}`;
+    $("position-order-count").textContent = rows.length.toLocaleString();
+    $("preview-detail").textContent = `${bidCount} bids · ${askCount} asks · bar height in USDC · faint line marks the period start${validation.invalidOrderCount ? ` · ${validation.invalidOrderCount} undersized orders in red` : ""}`;
     $("preview-detail").classList.toggle("warning", validation.invalidOrderCount > 0);
     const shortages = renderAmountStatus(distribution);
     renderGridValidation(validation, shortages);
-    if (searchMinimum) {
-      $("minimum-viable-position").textContent = "Calculating minimum viable position…";
-      $("use-minimum-amounts").disabled = true;
-      const minimum = await KuruSdkAdapter.findMinimumViablePosition(input, "base");
-      if (revision !== app.previewRevision) return;
-      app.minimumViablePosition = minimum;
-      $("minimum-viable-position").textContent = `Minimum viable MON ${formatRaw(minimum.minimumMonAmountRaw, 18, 12)} · Corresponding USDC ${formatRaw(minimum.minimumUsdcAmountRaw, 6, 6)}`;
-      $("use-minimum-amounts").disabled = false;
-    }
+    const minimum = await KuruSdkAdapter.minimumDepositSummary(input, distribution);
+    if (revision !== app.previewRevision) return;
+    const enteredMon = KuruSdkAdapter.decimalToRaw(input.monAmount, 18);
+    const enteredUsdc = KuruSdkAdapter.decimalToRaw(input.usdcAmount, 6);
+    const monGap = minimum.minimumMonRaw > enteredMon ? minimum.minimumMonRaw - enteredMon : 0n;
+    const usdcGap = minimum.minimumUsdcRaw > enteredUsdc ? minimum.minimumUsdcRaw - enteredUsdc : 0n;
+    $("minimum-mon").textContent = `SDK minimum ${formatRaw(minimum.minimumMonRaw, 18, 12)} MON${monGap ? ` · Add at least ${formatRaw(monGap, 18, 12)} MON` : ""}`;
+    $("minimum-usdc").textContent = `SDK minimum ${formatRaw(minimum.minimumUsdcRaw, 6, 6)} USDC${usdcGap ? ` · Add at least ${formatRaw(usdcGap, 6, 6)} USDC` : ""}`;
+    $("minimum-viable-position").textContent = "Official SDK minimums. Tick rounding can require more. The exact order-grid checks determine whether this position can run.";
   } catch (error) {
     if (revision !== app.previewRevision) return;
     app.generatedGrid = null;
     app.gridValidation = null;
-    app.minimumViablePosition = null;
+    ["distribution-chart", "range-depth-chart"].forEach((id) => prepareCanvas($(id)));
     $("preview-count").textContent = "Invalid setup";
+    $("position-order-count").textContent = "—";
     $("preview-detail").textContent = error.message;
     $("preview-detail").classList.add("warning");
     $("deployable-status").textContent = "No";
     $("deployable-status").classList.add("invalid");
     $("minimum-viable-position").textContent = "Minimum viable position unavailable";
-    $("use-minimum-amounts").disabled = true;
+    $("minimum-mon").textContent = "Minimum MON —";
+    $("minimum-usdc").textContent = "Minimum USDC —";
     setRunButtonState();
   }
 }
@@ -286,11 +368,15 @@ function clearResult(message = "No run yet", stale = false) {
 
 function markConfigurationChanged() {
   app.requestGate.change();
+  app.workflow?.invalidate();
+  app.previewRevision += 1;
   cancelCurrentJob().catch(() => {});
   app.running = false;
   app.generatedGrid = null;
   app.gridValidation = null;
-  app.minimumViablePosition = null;
+  $("minimum-mon").textContent = "Minimum MON —";
+  $("minimum-usdc").textContent = "Minimum USDC —";
+  $("job-progress").hidden = true;
   if (app.mode === "kuru_lp") clearResult("Configuration changed. Run a new backtest.", true);
   setRunButtonState();
 }
@@ -321,6 +407,7 @@ async function pollBacktestJob(job, token) {
     const total = status.total_events == null ? "?" : Number(status.total_events).toLocaleString();
     const percentComplete = Number(status.percent_complete || 0).toFixed(1);
     $("status").textContent = `${status.stage} · ${processed}/${total} events · ${percentComplete}%`;
+    $("job-progress").style.setProperty("--job-progress", `${Math.min(100, Math.max(0, Number(status.percent_complete || 0)))}%`);
     if (status.status === "completed") return status;
     if (["failed", "canceled", "stalled"].includes(status.status)) {
       const failure = status.failure;
@@ -397,6 +484,7 @@ async function runKuruBacktest() {
   const token = app.requestGate.begin();
   clearResult("Running backtest…");
   app.running = true;
+  $("job-progress").hidden = false;
   setRunButtonState();
   try {
     await renderDistributionPreview();
@@ -443,6 +531,7 @@ async function runKuruBacktest() {
     app.currentJob = null;
     $("cancel-backtest").hidden = true;
     $("status").textContent = "New backtest ready";
+    if (app.workflow) await app.workflow.show("results");
   } catch (error) {
     if (app.requestGate.accepts(token)) {
       clearResult(error.message);
@@ -454,6 +543,7 @@ async function runKuruBacktest() {
       app.running = false;
       setRunButtonState();
       $("cancel-backtest").hidden = true;
+      $("job-progress").hidden = true;
     }
   }
 }
@@ -570,8 +660,8 @@ function chartScale(values, width, height, padding) {
 }
 
 function drawGrid(context, width, height, padding, scale, formatter) {
-  context.strokeStyle = "#edf1ee";
-  context.fillStyle = "#76817f";
+  context.strokeStyle = "rgba(255,135,74,.07)";
+  context.fillStyle = "#a3978d";
   context.font = "10px Inter, system-ui, sans-serif";
   for (let row = 0; row <= 4; row += 1) {
     const y = padding.top + row / 4 * (height - padding.top - padding.bottom);
@@ -624,11 +714,11 @@ function drawPriceChart() {
   const padding = { left: 58, right: 14, top: 12, bottom: 22 };
   const layer = chartLayer("price", width, height, (layerContext) => {
     const scale = chartScale(frames.flatMap((frame) => [Number(frame.bid), Number(frame.ask), Number(frame.midpoint)]), width, height, padding);
-    drawLine(layerContext, frames, "bid", scale, "#3978d4", 1.2);
-    drawLine(layerContext, frames, "midpoint", scale, "#0d786d", 2.1);
-    drawLine(layerContext, frames, "ask", scale, "#d47a35", 1.2);
+    drawLine(layerContext, frames, "bid", scale, "#8894ff", 1.2);
+    drawLine(layerContext, frames, "midpoint", scale, "#ff874a", 2.1);
+    drawLine(layerContext, frames, "ask", scale, "#f2aa79", 1.2);
     frames.forEach((frame, index) => frame.fills.forEach((fill) => {
-      layerContext.beginPath(); layerContext.fillStyle = fill.side === "buy" ? "#3978d4" : "#c94c52";
+      layerContext.beginPath(); layerContext.fillStyle = fill.side === "buy" ? "#8894ff" : "#ed8d8d";
       layerContext.arc(scale.x(index, frames.length), scale.y(Number(fill.price)), 3.5, 0, Math.PI * 2); layerContext.fill();
     }));
     return { scale };
@@ -638,7 +728,7 @@ function drawPriceChart() {
   drawLayerPrefix(context, layer, width, height, app.frameIndex, frames.length);
   activeOrdersAt(app.frameIndex).forEach((order) => {
     const y = scale.y(Number(order.price));
-    context.setLineDash([5, 4]); context.strokeStyle = order.side === "buy" ? "#3978d4" : "#c94c52";
+    context.setLineDash([5, 4]); context.strokeStyle = order.side === "buy" ? "#8894ff" : "#f2aa79";
     context.beginPath(); context.moveTo(width * 0.76, y); context.lineTo(width - padding.right, y); context.stroke(); context.setLineDash([]);
   });
 }
@@ -658,7 +748,7 @@ function drawEquityChart() {
       marked_value: frame.marked_value,
       hold_value: initialValue + Number(frame.hold_baseline_pnl),
     }));
-    drawLine(layerContext, equityFrames, "marked_value", scale, "#0d786d", 2);
+    drawLine(layerContext, equityFrames, "marked_value", scale, "#ff874a", 2);
     drawLine(layerContext, equityFrames, "hold_value", scale, "#9aa5a2", 1.4);
     return { scale };
   });
@@ -717,16 +807,17 @@ function drawHistoryRangeChart() {
   const low = Math.min(...prices);
   const high = Math.max(...prices);
   const x = (block) => 5 + (Number(block) - first) / Math.max(1, last - first) * (width - 10);
-  const y = (value) => 5 + (high - Number(value)) / Math.max(1e-12, high - low) * (height - 18);
-  context.fillStyle = "rgba(242,176,79,.08)";
-  context.fillRect(0, 0, width, height);
+  const plotBottom = height - 38;
+  const y = (value) => 5 + (high - Number(value)) / Math.max(1e-12, high - low) * (plotBottom - 10);
+  context.fillStyle = "rgba(255,135,74,.025)";
+  context.fillRect(0, 0, width, plotBottom);
   // Coverage can expand after this chart file was built. Use the backend's
   // verified manifest, not stale coverage embedded in a Trade-only artifact.
   (app.intervalMetadata?.validated_l3_coverage || []).forEach((segment) => {
-    context.fillStyle = "rgba(168,208,74,.17)";
-    context.fillRect(x(segment.from_block), 0, Math.max(1, x(segment.to_block) - x(segment.from_block)), height);
+    context.fillStyle = "rgba(255,135,74,.045)";
+    context.fillRect(x(segment.from_block), 0, Math.max(1, x(segment.to_block) - x(segment.from_block)), plotBottom);
   });
-  context.strokeStyle = "#4fc1b2";
+  context.strokeStyle = "#bba38e";
   context.lineWidth = 1.2;
   context.beginPath();
   points.forEach((item, index) => {
@@ -736,8 +827,40 @@ function drawHistoryRangeChart() {
   context.stroke();
   const selectedFrom = Number($("from-block").value || first);
   const selectedTo = Number($("to-block").value || last);
-  context.fillStyle = "rgba(57,120,212,.13)";
-  context.fillRect(x(selectedFrom), 0, Math.max(1, x(selectedTo) - x(selectedFrom)), height);
+  context.fillStyle = "rgba(255,135,74,.10)";
+  context.fillRect(x(selectedFrom), 0, Math.max(1, x(selectedTo) - x(selectedFrom)), plotBottom);
+  context.strokeStyle = "#ff874a";
+  context.beginPath();
+  let started = false;
+  points.filter((point) => point.block >= selectedFrom && point.block <= selectedTo).forEach((point) => {
+    if (!started) { context.moveTo(x(point.block), y(point.price)); started = true; }
+    else context.lineTo(x(point.block), y(point.price));
+  });
+  context.stroke();
+  const ticks = Math.max(2, Math.min(5, Math.floor(width / 130)));
+  context.fillStyle = "#a3978d";
+  context.font = "9px Inter, system-ui, sans-serif";
+  for (let index = 0; index <= ticks; index += 1) {
+    const block = first + (last - first) * index / ticks;
+    const point = points.reduce((best, row) => Math.abs(row.block - block) < Math.abs(best.block - block) ? row : best, points[0]);
+    const date = new Date(Number(point.timestamp) * 1000);
+    context.textAlign = index === 0 ? "left" : index === ticks ? "right" : "center";
+    context.fillText(date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }), x(block), height - 17);
+    context.fillText(date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }), x(block), height - 4);
+  }
+}
+
+function renderPeriodSummary() {
+  const matches = app.rangeMetadata
+    && Number(app.rangeMetadata.from_block) === Number($("from-block").value)
+    && Number(app.rangeMetadata.to_block) === Number($("to-block").value);
+  const metadata = matches ? app.rangeMetadata : null;
+  const startingPrice = metadata?.reference_price ?? (metadata?.reference_price_raw != null ? KuruSdkAdapter.rawToDecimal(metadata.reference_price_raw, 8) : null);
+  $("period-start-price").textContent = startingPrice != null ? `${startingPrice} USDC` : "Loading…";
+  const statistics = metadata?.trade_price_statistics;
+  for (const [id, key] of [["period-end-price", "ending_price"], ["period-high-price", "highest_price"], ["period-low-price", "lowest_price"]]) {
+    $(id).textContent = statistics?.[key] != null ? `${statistics[key]} USDC` : statistics ? "No Trades" : metadata ? "Unavailable" : "—";
+  }
 }
 
 function setRangeInputs(fromBlock, toBlock) {
@@ -755,6 +878,12 @@ function setRangeInputs(fromBlock, toBlock) {
   const endPercent = (end - scope.from_block) / span * 100;
   $("range-start-slider").parentElement.style.setProperty("--range-start-percent", `${startPercent}%`);
   $("range-start-slider").parentElement.style.setProperty("--range-end-percent", `${endPercent}%`);
+  renderPeriodSummary();
+  // Trade chart dates are approximate, not block-header timestamps.
+  const nearest = (block) => app.tradeChart.points.reduce((best, point) => !best || Math.abs(point.block - block) < Math.abs(best.block - block) ? point : best, null);
+  const dateText = (point) => point ? `≈ ${new Date(Number(point.timestamp) * 1000).toLocaleString("en-GB", { timeZone: "UTC", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} UTC` : "—";
+  $("period-start-time").textContent = dateText(nearest(start));
+  $("period-end-time").textContent = dateText(nearest(end));
   drawHistoryRangeChart();
 }
 
@@ -766,6 +895,7 @@ async function refreshRangeMetadata() {
   const controller = new AbortController();
   app.rangeRequestController = controller;
   app.rangeMetadata = null;
+  renderPeriodSummary();
   $("range-coverage-status").textContent = "Checking L3 coverage";
   $("range-coverage-status").className = "";
   setRunButtonState();
@@ -792,16 +922,18 @@ async function refreshRangeMetadata() {
     const message = error && typeof error === "object" ? error.message : error;
     $("range-coverage-status").textContent = "Not backtestable";
     $("range-coverage-status").className = "unavailable";
-    $("history-scope-note").textContent = message || "This range has no continuous validated L3 coverage.";
+    $("status").textContent = message || "This range has no continuous validated L3 coverage.";
+    $("period-start-price").textContent = "Unavailable";
     app.generatedGrid = null;
     app.gridValidation = null;
     setRunButtonState();
     return;
   }
   app.rangeMetadata = payload;
+  renderPeriodSummary();
   $("range-coverage-status").textContent = "Validated L3";
   $("range-coverage-status").className = "available";
-  $("history-scope-note").textContent = `${Number(payload.event_count).toLocaleString()} local events · checkpoint ${Number(payload.checkpoint_block).toLocaleString()} · no network query`;
+  setRunButtonState();
   if (app.mode === "kuru_lp") await renderDistributionPreview();
 }
 
@@ -850,22 +982,83 @@ $("cancel-backtest").addEventListener("click", async () => {
   clearResult("Backtest canceled.");
   setRunButtonState();
 });
-document.querySelectorAll(".mode-button").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
-["liquidity-shape", "lower-range-percent", "upper-range-percent", "minimum-price", "maximum-price", "flip-spread"].forEach((id) => $(id).addEventListener("input", () => {
-  markConfigurationChanged(); renderDistributionPreview();
+["liquidity-shape", "flip-spread"].forEach((id) => $(id).addEventListener("input", () => {
+  markConfigurationChanged(); queuePricePreview({ final: true });
 }));
-$("absolute-range-mode").addEventListener("change", () => {
-  $("absolute-range-fields").hidden = !$("absolute-range-mode").checked;
-  $("lower-range-percent").disabled = $("absolute-range-mode").checked;
-  $("upper-range-percent").disabled = $("absolute-range-mode").checked;
+["minimum-price", "maximum-price"].forEach((id) => $(id).addEventListener("input", () => {
+  $("absolute-range-mode").checked = true;
+  markConfigurationChanged(); queuePricePreview({ final: true });
+}));
+["lower-range-percent", "upper-range-percent"].forEach((id) => $(id).addEventListener("input", () => {
   markConfigurationChanged();
-  renderDistributionPreview();
+  try {
+    const metadata = currentMetadata();
+    const bounds = PriceRange.offsetBounds(metadata.reference_price_raw, $("lower-range-percent").value, $("upper-range-percent").value, metadata.tick_size, KuruSdkAdapter.decimalToRaw);
+    $("minimum-price").value = KuruSdkAdapter.rawToDecimal(bounds.minimumPriceRaw, 8);
+    $("maximum-price").value = KuruSdkAdapter.rawToDecimal(bounds.maximumPriceRaw, 8);
+    $("absolute-range-mode").checked = Number($("lower-range-percent").value) > 0 || Number($("upper-range-percent").value) < 0;
+    queuePricePreview({ final: true });
+  } catch (error) {
+    ["distribution-chart", "range-depth-chart"].forEach((canvasId) => prepareCanvas($(canvasId)));
+    $("preview-detail").textContent = error.message;
+    $("preview-detail").classList.add("warning");
+  }
+}));
+[$("price-min-slider"), $("price-max-slider")].forEach((slider, index) => {
+  slider.addEventListener("input", () => {
+    if (!app.priceSelection || app.running) return;
+    app.priceSelection.moveEdge(index === 0 ? "minimum" : "maximum", app.priceSelection.domainMinimum + BigInt(slider.value));
+    useSelectionBounds();
+  });
+  slider.addEventListener("change", () => queuePricePreview({ final: true }));
+});
+const priceMarker = $("price-center-marker");
+let centerDrag = null;
+priceMarker.addEventListener("pointerdown", (event) => {
+  if (!app.priceSelection || app.running) return;
+  event.preventDefault();
+  centerDrag = { pointerId: event.pointerId, rect: $("distribution-chart").getBoundingClientRect() };
+  priceMarker.setPointerCapture(event.pointerId);
+});
+priceMarker.addEventListener("pointermove", (event) => {
+  if (!centerDrag || event.pointerId !== centerDrag.pointerId) return;
+  const { rect } = centerDrag;
+  app.priceSelection.moveCenter(app.priceSelection.priceAt((event.clientX - rect.left) / rect.width));
+  useSelectionBounds();
+});
+const finishCenterDrag = (event) => {
+  if (!centerDrag || event.pointerId !== centerDrag.pointerId) return;
+  centerDrag = null;
+  queuePricePreview({ final: true });
+};
+priceMarker.addEventListener("pointerup", finishCenterDrag);
+priceMarker.addEventListener("pointercancel", finishCenterDrag);
+priceMarker.addEventListener("keydown", (event) => {
+  if (!app.priceSelection || app.running || !["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  try {
+    if (event.key === "Home") app.priceSelection.reset();
+    else app.priceSelection.moveCenter(app.priceSelection.center + app.priceSelection.tick * BigInt(event.key === "ArrowLeft" ? -1 : 1) * BigInt(event.shiftKey ? 10 : 1));
+    useSelectionBounds({ final: true });
+  } catch (error) { $("status").textContent = error.message; }
+});
+$("range-center-price").addEventListener("change", () => {
+  if (!app.priceSelection || app.running) return;
+  try {
+    app.priceSelection.moveCenter(KuruSdkAdapter.decimalToRaw($("range-center-price").value, 8));
+    useSelectionBounds({ final: true });
+  } catch (error) { $("status").textContent = error.message; }
+});
+$("reset-price").addEventListener("click", () => {
+  if (!app.priceSelection || app.running) return;
+  try { app.priceSelection.reset(); useSelectionBounds({ final: true }); }
+  catch (error) { $("status").textContent = error.message; }
 });
 $("mon-amount").addEventListener("input", () => {
-  app.amountDriver = "base"; app.lastEditedToken = "base"; markConfigurationChanged(); renderDistributionPreview();
+  markConfigurationChanged(); renderDistributionPreview();
 });
 $("usdc-amount").addEventListener("input", () => {
-  app.amountDriver = "quote"; app.lastEditedToken = "quote"; markConfigurationChanged(); renderDistributionPreview();
+  markConfigurationChanged(); renderDistributionPreview();
 });
 $("regime").addEventListener("change", () => {
   selectGoldenPreset().catch((error) => clearResult(error.message));
@@ -884,45 +1077,13 @@ $("regime").addEventListener("change", () => {
 [$("from-block"), $("to-block")].forEach((input) => input.addEventListener("input", () => {
   app.rangeMetadata = null;
   markConfigurationChanged();
+  renderPeriodSummary();
   clearTimeout(app.rangeRefreshTimer);
   app.rangeRefreshTimer = setTimeout(() => {
     setRangeInputs($("from-block").value, $("to-block").value);
     refreshRangeMetadata().catch((error) => clearResult(error.message));
   }, 400);
 }));
-$("auto-fill-amounts").addEventListener("click", async () => {
-  markConfigurationChanged();
-  const configurationRevision = app.requestGate.snapshot().revision;
-  app.amountDriver = app.lastEditedToken;
-  await renderDistributionPreview();
-  if (configurationRevision !== app.requestGate.snapshot().revision) return;
-  if (!app.generatedGrid) return;
-  if (app.amountDriver === "base") {
-    $("usdc-amount").value = KuruSdkAdapter.rawToDecimal(app.generatedGrid.requiredUsdcRaw, 6);
-  } else {
-    try {
-      const balanced = await KuruSdkAdapter.balanceQuoteDeposit(sdkInput());
-      if (configurationRevision !== app.requestGate.snapshot().revision) return;
-      $("mon-amount").value = KuruSdkAdapter.rawToDecimal(balanced.monAmountRaw, 18);
-      app.amountDriver = "base";
-    } catch (error) {
-      if (configurationRevision !== app.requestGate.snapshot().revision) return;
-      clearResult(error.message);
-      return;
-    }
-  }
-  await renderDistributionPreview();
-});
-$("use-minimum-amounts").addEventListener("click", async () => {
-  if (!app.minimumViablePosition) return;
-  const minimum = app.minimumViablePosition;
-  markConfigurationChanged();
-  $("mon-amount").value = KuruSdkAdapter.rawToDecimal(minimum.minimumMonAmountRaw, 18);
-  $("usdc-amount").value = KuruSdkAdapter.rawToDecimal(minimum.minimumUsdcAmountRaw, 6);
-  app.amountDriver = minimum.driver;
-  app.lastEditedToken = minimum.driver;
-  await renderDistributionPreview();
-});
 $("play-button").addEventListener("click", togglePlayback);
 $("scrubber").addEventListener("input", (event) => { stopPlayback(); renderFrame(Number(event.target.value)); });
 document.querySelectorAll(".speed-button").forEach((button) => button.addEventListener("click", () => {
@@ -932,8 +1093,27 @@ document.querySelectorAll(".speed-button").forEach((button) => button.addEventLi
 }));
 window.addEventListener("resize", () => {
   drawHistoryRangeChart();
-  renderDistributionPreview({ searchMinimum: false });
+  if (app.generatedGrid && app.gridValidation) drawDistribution(app.generatedGrid, app.gridValidation);
   if (app.replay) renderFrame(app.frameIndex);
 });
 
+app.workflow = BacktestWorkflow.create({
+  panels: { timeframe: $("step-timeframe"), strategy: $("step-strategy"), results: $("step-results") },
+  steps: [...document.querySelectorAll(".step-button")],
+  wait: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  reducedMotion: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  onEnter: (step) => {
+    if (step !== "results") stopPlayback();
+    document.querySelector(".app-shell").dataset.stage = step;
+    if (step === "timeframe") drawHistoryRangeChart();
+    if (step === "strategy" && app.generatedGrid && app.gridValidation) drawDistribution(app.generatedGrid, app.gridValidation);
+    if (step === "results" && app.replay) renderFrame(app.frameIndex);
+    $(step === "results" ? "run-title" : `${step}-title`).focus({ preventScroll: true });
+  },
+});
+document.querySelectorAll("[data-navigate]").forEach((button) => button.addEventListener("click", () => {
+  if (app.running || button.disabled) return;
+  app.workflow.show(button.dataset.navigate);
+}));
+$("timeframe-next").addEventListener("click", () => app.workflow.show("strategy"));
 initialize();

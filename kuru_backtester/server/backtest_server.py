@@ -9,7 +9,6 @@ import json
 import secrets
 import socket
 import subprocess
-import time
 from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +19,8 @@ from urllib.parse import parse_qs, urlparse
 from kuru_backtester.server.backtest_service import BacktestInputError, BacktestService
 from kuru_backtester.server.backtest_jobs import BacktestJobManager, JobError
 from kuru_backtester.server.full_history_monitor import read_progress, PROGRESS_PATH
+from kuru_backtester.server.data_suite import DataSuite, DataSuiteError
+from kuru_backtester.server.http_response import QuietDisconnectMixin
 
 
 from kuru_backtester.paths import ROOT
@@ -56,9 +57,10 @@ def browser_urls(host: str, port: int, access_token: str | None) -> list[str]:
     return [f"http://{address}:{port}{suffix}" for address in addresses]
 
 
-class BacktestHandler(SimpleHTTPRequestHandler):
+class BacktestHandler(QuietDisconnectMixin, SimpleHTTPRequestHandler):
     service: BacktestService
     jobs: BacktestJobManager
+    data_suite: DataSuite
     access_token: str | None = None
 
     def authorized(self) -> bool:
@@ -85,24 +87,6 @@ class BacktestHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def send_json(self, status: int, payload: Any) -> dict[str, Any]:
-        encode_start = time.perf_counter()
-        body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        encode_seconds = time.perf_counter() - encode_start
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        write_start = time.perf_counter()
-        self.wfile.write(body)
-        self.wfile.flush()
-        return {
-            "encoded_bytes": len(body),
-            "json_encoding_seconds": encode_seconds,
-            "socket_write_seconds": time.perf_counter() - write_start,
-        }
-
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
@@ -118,7 +102,13 @@ class BacktestHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "Open the access URL printed by the server."})
             return
         if path == "/api/indexing-progress":
-            self.send_json(HTTPStatus.OK, read_progress(PROGRESS_PATH))
+            self.send_json(HTTPStatus.OK, self.data_suite.progress() or read_progress(PROGRESS_PATH))
+            return
+        if path == "/api/data-suite":
+            try:
+                self.send_json(HTTPStatus.OK, self.data_suite.status())
+            except Exception as error:
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
             return
         if path == "/api/intervals":
             try:
@@ -156,7 +146,8 @@ class BacktestHandler(SimpleHTTPRequestHandler):
                 elif parts[3] == "result":
                     result = self.jobs.result(run_id, owner)
                     metrics = self.send_json(HTTPStatus.OK, result)
-                    self.jobs.record_response_transmission(run_id, owner, metrics)
+                    if metrics is not None:
+                        self.jobs.record_response_transmission(run_id, owner, metrics)
                 elif parts[3] == "fills":
                     self.send_json(HTTPStatus.OK, self.jobs.fills(run_id, owner))
                 else:
@@ -172,7 +163,28 @@ class BacktestHandler(SimpleHTTPRequestHandler):
         if not self.authorized():
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "server access token is required"})
             return
-        if urlparse(self.path).path != "/api/backtests":
+        path = urlparse(self.path).path
+        if path in {"/api/data-suite/head", "/api/data-suite/download", "/api/data-suite/stop"}:
+            try:
+                if path.endswith("/head"):
+                    result = self.data_suite.refresh_head()
+                elif path.endswith("/stop"):
+                    result = self.data_suite.stop()
+                else:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 4096:
+                        raise DataSuiteError("Download request size is invalid")
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict):
+                        raise DataSuiteError("Download request must be an object")
+                    result = self.data_suite.start(payload)
+                self.send_json(HTTPStatus.OK, result)
+            except (DataSuiteError, ValueError, TypeError) as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            except Exception as error:
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            return
+        if path != "/api/backtests":
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "unknown API path"})
             return
         try:
@@ -223,6 +235,7 @@ def main() -> int:
     jobs = BacktestJobManager(maximum_workers=args.maximum_workers)
     BacktestHandler.service = service
     BacktestHandler.jobs = jobs
+    BacktestHandler.data_suite = DataSuite()
     BacktestHandler.access_token = None if args.host in {"127.0.0.1", "localhost", "::1"} else secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((args.host, args.port), BacktestHandler)
     print("Kuru backtest server. Open in your browser:", flush=True)
@@ -235,6 +248,7 @@ def main() -> int:
     finally:
         server.server_close()
         jobs.close()
+        BacktestHandler.data_suite.close()
     return 0
 
 

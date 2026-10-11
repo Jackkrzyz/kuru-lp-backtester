@@ -335,10 +335,15 @@ class RateLimitedHyperSyncClient:
         for attempt in range(self.max_retries + 1):
             try:
                 if self.observer:
-                    self.observer({"kind": "request", "from_block": payload["from_block"]})
+                    self.observer({"kind": "request", "from_block": payload["from_block"],
+                                   "to_block_exclusive": payload.get("to_block"),
+                                   "lookup_only": not bool(payload.get("logs"))})
                 result, headers = self.http_post(payload)
                 if self.observer:
                     self.observer({"kind": "response", "headers": relevant_rate_limit_headers(headers),
+                                   "next_block": result.get("next_block"),
+                                   "log_count": sum(len(batch.get("logs", [])) for batch in result.get("data", [])),
+                                   "block_count": sum(len(batch.get("blocks", [])) for batch in result.get("data", [])),
                                    "decoded_response_bytes": len(json.dumps(result).encode("utf-8"))})
                 return result
             except HTTPError as error:

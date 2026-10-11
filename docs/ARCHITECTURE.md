@@ -19,9 +19,17 @@ The old `engine/strategy_vertical_slice.py` name is retained because the module 
 
 `history/index_history.py` downloads a bounded canonical event partition. `history/reconstruction_validation_report.py` compares it with RPC and contract L2. `history/promote_historical_partition.py` adds only passing data to the local manifest.
 
-`history/full_history.py` composes these steps in resumable partitions. It has a durable page cursor and a writer lock. Download-only output remains unvalidated. An unsupported implementation or vault state stops reconstruction. The progress monitor only reads the progress file.
+`history/full_history.py` composes these steps in resumable partitions. It has a durable page cursor and a writer lock. Download-only output remains unvalidated. An unsupported implementation or vault state stops reconstruction. The standalone progress monitor is read-only. The app's Data suite uses `server/data_suite.py` to inspect local metadata and start bounded download-only subprocesses through the same CLI. No reconstruction or strategy rules are changed.
 
 The root manifests retain their locations to preserve relative event paths and existing content identities. `paths.py` supplies the common repository root for Python modules. Do not derive the root from a nested module's parent directory.
+
+The Data suite serves a cached inventory snapshot. One background thread scans
+saved file metadata at most once per minute after completion. Its scan lock is
+separate from job controls and progress reads. First-load totals are unknown
+until a scan completes. Scan failures preserve the last snapshot. Both local
+HTTP handlers use `server/http_response.py` to handle a closed client without
+sending another error response. The browser retains unchanged tables and
+updates worker age and retry timers separately.
 
 ## Source and generated files
 
