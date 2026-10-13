@@ -1,0 +1,2 @@
+# Recording hashes cover exact bytes. Do not change JSON line endings on checkout.
+data/*.json -text

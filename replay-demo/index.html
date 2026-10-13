@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore recorded Kuru LP backtests from validated Monad history. Static replay only.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317191c'/%3E%3Ctext x='5' y='23' fill='%23ff874a' font-size='23' font-family='sans-serif'%3Ek%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/base.css">
+  <link rel="stylesheet" href="demo.css">
+  <title>kuruLab · Recorded replay demo</title>
+  <script src="assets/replay-renderer.js" defer></script>
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <header class="demo-header">
+    <a class="wordmark" href="./" aria-label="kuruLab home">kuru<span>Lab</span></a>
+    <strong class="demo-badge">Recorded replay demo</strong>
+    <nav aria-label="Demo links"><button id="about-demo" type="button" class="secondary-button">About</button><a href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
+  </header>
+  <main class="demo-layout">
+    <aside class="configuration-panel" aria-labelledby="recordings-title">
+      <h1 id="recordings-title">Recorded positions</h1>
+      <p class="muted">MON / USDC · Monad Mainnet</p>
+      <label for="recording-select">Recorded configuration</label>
+      <select id="recording-select" disabled><option>Loading recordings…</option></select>
+      <dl id="configuration" class="configuration"></dl>
+      <button id="load-replay" type="button" class="primary-button" disabled>Load Replay</button>
+      <p id="load-status" class="muted" role="status">Reading the static catalog.</p>
+      <p id="load-error" class="error-message" role="alert" hidden></p>
+      <details><summary>Exact recorded configuration</summary><pre id="configuration-json">Select a recording.</pre></details>
+      <p class="read-only-note">Values are read-only. Install kuruLab locally to configure and compute new backtests.</p>
+      <p class="read-only-note">Gas excluded. Historical taker behavior is held fixed.</p>
+    </aside>
+    <section class="replay-workspace" aria-label="Recorded results">
+      <div id="empty-state" class="empty-state"><h2>History, replayed.</h2><p>Choose a recorded position and select <strong>Load Replay</strong>.</p></div>
+      <div id="recorded-results" hidden>
+        <header class="result-heading"><div><span class="eyebrow">Recorded Kuru LP result</span><h2 id="run-title">MON / USDC</h2></div><span id="engine-version" class="muted"></span></header>
+        <p id="impact-warning" class="impact-warning" role="status" hidden></p>
+        <section class="chart-card" aria-label="Interactive recorded replay">
+          <div class="replay-legend"><strong>Market prices</strong><span>Best bid / ask · Buy / sell fills</span></div>
+          <canvas id="price-chart" role="img" aria-label="Recorded best bid and ask with fills at their execution price and time"></canvas>
+          <div class="replay-legend"><strong>Portfolio value · USDC</strong><span>Strategy (orange) · Hold (gray)</span></div>
+          <canvas id="equity-chart" role="img" aria-label="Recorded strategy portfolio value and unchanged hold baseline"></canvas>
+          <p id="frame-time" class="chart-subtitle">—</p>
+          <div class="playback-row">
+            <button id="play-button" class="play-button" type="button" aria-label="Play replay" aria-pressed="false">▶</button>
+            <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Replay timeline">
+            <span class="frame-counter"><span id="current-frame">1</span> / <span id="total-frames">—</span></span>
+            <div class="speed-controls" role="group" aria-label="Playback speed">
+              <button class="speed-button active" data-speed="1" type="button" aria-pressed="true">1x</button>
+              <button class="speed-button" data-speed="10" type="button" aria-pressed="false">10x</button>
+              <button class="speed-button" data-speed="50" type="button" aria-pressed="false">50x</button>
+              <button class="speed-button" data-speed="100" type="button" aria-pressed="false">100x</button>
+            </div>
+          </div>
+        </section>
+        <section class="results-card" aria-labelledby="metrics-title"><h2 id="metrics-title">Recorded final results</h2><div id="metrics" class="metric-grid"></div></section>
+        <section class="orders-card"><div class="section-heading"><h2>Orders at replay cursor</h2><span id="block-label">Block —</span></div><div id="orders-list" class="orders-list"></div><div class="event-strip"><span>Frame actions</span><strong id="frame-actions">—</strong></div><div id="frame-balances" class="frame-balances"></div></section>
+        <details class="verification-details"><summary>Recording and verification</summary><dl id="recording-details"></dl></details>
+      </div>
+    </section>
+    <footer class="assumptions">
+      <strong>Replay assumptions</strong>
+      <p>Gas costs are excluded. Simulated LP orders do not change historical taker behavior or subsequent market events. Impact warnings show where this assumption is material.</p>
+      <p>This demo loads saved results. It does not compute new backtests or download historical data. <a href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">Install the full application ↗</a> · <a href="LICENSE">MIT license</a></p>
+    </footer>
+  </main>
+  <dialog id="welcome-modal" aria-labelledby="welcome-title" aria-describedby="welcome-description">
+    <h2 id="welcome-title" tabindex="-1">Welcome to the kuruLab replay demo</h2>
+    <div id="welcome-description">
+      <p>Explore recorded LP backtests generated by kuruLab using validated Kuru market history on Monad.</p>
+      <p>This hosted demo includes saved configurations, results, and interactive replay. It does not compute new backtests or download historical data.</p>
+      <p>The full MIT-licensed application is available on GitHub for local installation, including configurable backtesting and historical data preparation.</p>
+    </div>
+    <div class="welcome-actions"><button id="explore-demo" type="button" class="primary-button" autofocus>Explore demo</button><a id="welcome-github" class="secondary-button" href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">View GitHub</a></div>
+  </dialog>
+</body>
+</html>
