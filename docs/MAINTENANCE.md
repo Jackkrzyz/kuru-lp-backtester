@@ -11,11 +11,11 @@ the active download. See the proposed
 [hosting plan](plans/HOSTING_AND_SUBMISSION.md) and
 [wallet execution plan](plans/WALLET_EXECUTION.md). Neither plan is implemented.
 
-The later UI and Data suite changes passed **259 tests and 12 subtests**. The
-LP page now uses a three-step flow, exact SDK range previews, manual token
-amounts, and visible historical prices and dates. The Data suite combines the
-Envio flow diagram, progress trace, coverage, storage totals, and bounded
-download controls.
+The earlier UI and Data suite changes passed **259 tests and 12 subtests**.
+The subsequent kuruLab terminal replaces that three-step flow and dataflow
+diagram with one grid, dated Trade candles, chart-based range selection,
+and a shared job log. Exact SDK range previews, manual token amounts, storage
+totals, and bounded download controls remain. See [terminal details](TERMINAL_UI.md).
 
 The status-page correction moved storage scans to one background thread,
 reduced duplicate file-status calls, separated scan and job locks, and handled

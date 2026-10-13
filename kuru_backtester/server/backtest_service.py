@@ -50,6 +50,8 @@ def period_trade_prices(events: Any) -> dict[str, str | None]:
     This read-only summary does not reconstruct or simulate a new book.
     """
     closing = high = low = None
+    if isinstance(events, historical_system.ReplayCursor):
+        events = events.trade_events()
     for event in events:
         if event.name != "Trade":
             continue
@@ -479,6 +481,22 @@ class BacktestService:
         self._lp_range_engine = historical_system.KuruLpBacktestEngine(
             MAX_COMPACT_FRAMES
         )
+        stat = self._event_store.manifest_path.stat()
+        self._history_index_stamp = (stat.st_mtime_ns, stat.st_size)
+
+    def refresh_historical_index(self):
+        """Pick up newly published local coverage without restarting the server."""
+        with self._interval_lock:
+            path = self._event_store.manifest_path
+            stat = path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+            if stamp != self._history_index_stamp:
+                events = historical_system.HistoricalEventStore(path, self._history_validation)
+                checkpoints = historical_system.CheckpointStore(path, self._history_validation)
+                reconstruction = historical_system.ReconstructionEngine(events, checkpoints)
+                self._event_store, self._checkpoint_store, self._reconstruction = events, checkpoints, reconstruction
+                self._history_index_stamp = stamp
+            return self._event_store, self._reconstruction
 
     def contract_rules(self, data: IntervalData) -> dict[str, Any]:
         path = ROOT / ".cache/lp_contract_rules.json"
@@ -569,11 +587,12 @@ class BacktestService:
         """Load one arbitrary, continuously indexed range from local files."""
         if from_block > to_block:
             raise BacktestInputError("from_block must not exceed to_block")
+        event_store, reconstruction = self.refresh_historical_index()
         try:
-            self._event_store.require_coverage(market, from_block, to_block)
-            reconstructed = self._reconstruction.reconstruct_start(market, from_block)
+            event_store.require_coverage(market, from_block, to_block)
+            reconstructed = reconstruction.reconstruct_start(market, from_block)
             cursor = historical_system.ReplayCursor(
-                self._event_store, market, from_block, to_block
+                event_store, market, from_block, to_block
             )
             timestamps = cursor.timestamps()
             timestamps[from_block - 1] = reconstructed.state_timestamp
@@ -598,8 +617,8 @@ class BacktestService:
             "best_bid_price_raw": best_bid,
             "best_ask_price_raw": best_ask,
         }
-        partition_identity = self._event_store.content_identity(from_block, to_block)
-        selected_partitions = self._event_store.selected_partitions(from_block, to_block)
+        partition_identity = event_store.content_identity(from_block, to_block)
+        selected_partitions = event_store.selected_partitions(from_block, to_block)
         golden_fixture = None
         if (
             len(selected_partitions) == 1
@@ -683,6 +702,7 @@ class BacktestService:
         return value
 
     def interval_metadata(self) -> dict[str, Any]:
+        self.refresh_historical_index()
         output = []
         for name in self._manifest["intervals"]:
             cache_path = checkpoint_cache_path(name)

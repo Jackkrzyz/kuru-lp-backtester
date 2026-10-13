@@ -27,6 +27,7 @@ function context() {
     clearResult: () => {}, setRunButtonState: () => {},
     renderDistributionPreview: async () => {}, buildKuruRequest: () => ({ shape: "spot" }),
     pollBacktestJob: async () => {}, applyKuruResponse: () => {},
+    refreshSavedBacktests: async () => {},
     jobHeaders: (job) => ({ "X-Backtest-Owner": job.ownerToken }),
   };
 }
@@ -101,7 +102,7 @@ async function main() {
     ctx.markConfigurationChanged = () => ctx.app.requestGate.change();
     vm.createContext(ctx);
     vm.runInContext(source.slice(source.indexOf('$("mon-amount").addEventListener'),
-      source.indexOf('$("regime").addEventListener')), ctx);
+      source.indexOf('[$("range-start-slider"), $("range-end-slider")]')), ctx);
     ctx.$("mon-amount").value = "6400";
     ctx.$("usdc-amount").value = "244.610955";
     handlers["mon-amount"]();
@@ -109,6 +110,50 @@ async function main() {
     assert.equal(ctx.$("mon-amount").value, "6400", "preview must not change entered MON");
     assert.equal(ctx.$("usdc-amount").value, "244.610955", "preview must not change entered USDC");
     assert.equal(ctx.app.amountDriver, "both");
+  }
+  {
+    const ctx=context(),pending=deferred();let applied=false;
+    ctx.$('saved-run-select').value='lp-old';
+    ctx.fetch=async()=>pending.promise;
+    ctx.app.workflow={show:async()=>{}};
+    ctx.applyKuruResponse=()=>{applied=true;};
+    vm.createContext(ctx);
+    vm.runInContext(source.slice(source.indexOf('async function loadSavedBacktest()'),source.indexOf('async function runKuruBacktest()')),ctx);
+    const loading=ctx.loadSavedBacktest();await new Promise(resolve=>setImmediate(resolve));
+    ctx.app.requestGate.change();
+    pending.resolve({ok:true,json:async()=>({normalized_configuration:{},compact_timeline:[]})});
+    await loading;
+    assert.equal(applied,false,'An old saved-result response cannot replace an edited configuration');
+  }
+  {
+    const ctx=context(),requests=[];
+    const result={run_id:'lp-saved',interval:{from_block:10,to_block:20},normalized_configuration:{market:'market',
+      amount_driver:'both',shape:'curve',minimum_price:'1',maximum_price:'2',fee_percent:'0.3',mon_amount:'2000',usdc_amount:'60'}};
+    ctx.$('saved-run-select').value='lp-saved';
+    ctx.fetch=async(path,options)=>{requests.push([path,options]);return {ok:true,json:async()=>result};};
+    ctx.setRangeInputs=(first,last)=>{ctx.$('from-block').value=first;ctx.$('to-block').value=last;};
+    ctx.refreshRangeMetadata=async()=>{};
+    ctx.app.workflow={show:async()=>{}};
+    let applied;ctx.applyKuruResponse=value=>{applied=value;};
+    vm.createContext(ctx);
+    vm.runInContext(source.slice(source.indexOf('async function loadSavedBacktest()'),source.indexOf('async function runKuruBacktest()')),ctx);
+    await ctx.loadSavedBacktest();
+    assert.equal(applied,result);assert.equal(ctx.$('liquidity-shape').value,'curve');
+    assert.equal(ctx.$('from-block').value,10);assert.equal(ctx.$('mon-amount').value,'2000');
+    assert.equal(requests.length,1);assert.ok(requests[0][0].startsWith('/api/saved-backtests/'));
+    assert.notEqual(requests[0][1].method,'POST','Loading cannot start simulation');
+  }
+  {
+    const ctx=context();vm.createContext(ctx);
+    vm.runInContext(source.slice(source.indexOf('function syncReplayVisibility()'),source.indexOf('function clearResult(')),ctx);
+    ctx.app.replay=null;ctx.syncReplayVisibility();
+    assert.equal(ctx.$('backtest-replay').hidden,true,'No run: the chart itself is hidden');
+    ctx.app.replay={frames:[]};ctx.syncReplayVisibility();
+    assert.equal(ctx.$('backtest-replay').hidden,true,'An empty replay cannot reveal the chart');
+    ctx.app.replay={frames:[{}]};ctx.syncReplayVisibility();
+    assert.equal(ctx.$('backtest-replay').hidden,false,'A completed or loaded replay reveals the chart');
+    ctx.app.replay=null;ctx.syncReplayVisibility();
+    assert.equal(ctx.$('step-results').hidden,true,'Clearing a result hides its entire panel');
   }
   process.stdout.write("Frontend asynchronous ownership tests passed.\n");
 }

@@ -1,12 +1,5 @@
 "use strict";
 
-const DATA_ROOT = "public/data";
-const regimeLabels = {
-  relatively_active: "Relatively active",
-  relatively_quiet: "Relatively quiet",
-  directional: "Directional move",
-};
-
 const app = {
   mode: "kuru_lp",
   intervalMetadata: null,
@@ -48,10 +41,7 @@ const quantity = (value, digits = 2) => `${Number(value).toFixed(digits)} MON`;
 const price = (value) => (value == null ? "—" : Number(value).toFixed(6));
 const percent = (value) => `${Number(value).toFixed(2)}%`;
 
-function currentMetadata() {
-  if (app.tradeChart) return app.rangeMetadata;
-  return app.intervalMetadata && app.intervalMetadata[$("regime").value];
-}
+function currentMetadata() { return app.rangeMetadata; }
 
 function signedMoney(value) {
   const numeric = Number(value);
@@ -208,10 +198,11 @@ function drawDistribution(grid, validation) {
     context.setLineDash([]);
     context.fillStyle = "#a3978d";
     context.font = "9px Inter, system-ui, sans-serif";
-    for (let index = 0; index <= 6; index += 1) {
-      const raw = selection.domainMinimum + (selection.domainMaximum - selection.domainMinimum) * BigInt(index) / 6n;
-      context.textAlign = index === 0 ? "left" : index === 6 ? "right" : "center";
-      context.fillText(KuruSdkAdapter.rawToDecimal(raw, 8), width * index / 6, height - 5);
+    const tickCount = Math.max(2, Math.min(6, Math.floor(width / 95)));
+    for (let index = 0; index <= tickCount; index += 1) {
+      const raw = selection.domainMinimum + (selection.domainMaximum - selection.domainMinimum) * BigInt(index) / BigInt(tickCount);
+      context.textAlign = index === 0 ? "left" : index === tickCount ? "right" : "center";
+      context.fillText(KuruSdkAdapter.rawToDecimal(raw, 8), width * index / tickCount, height - 5);
     }
   });
 }
@@ -253,7 +244,8 @@ function setRunButtonState() {
   const button = $("backtest-form").querySelector(".run-button");
   const canRun = app.mode !== "kuru_lp" || Boolean(app.gridValidation?.deployable);
   button.disabled = app.running || !canRun;
-  $("run-button-label").textContent = app.running ? "Running backtest…" : "Run backtest";
+  $("run-button-label").textContent = app.loadingSaved ? "Loading results…" : app.running ? "Running backtest…" : "Run backtest";
+  if ($("load-saved-run")) $("load-saved-run").disabled = app.running || !$("saved-run-select").value;
   const ready = Boolean(app.rangeMetadata)
     && Number(app.rangeMetadata.from_block) === Number($("from-block").value)
     && Number(app.rangeMetadata.to_block) === Number($("to-block").value);
@@ -330,6 +322,12 @@ async function renderDistributionPreview() {
 }
 
 
+function syncReplayVisibility() {
+  const available = Boolean(app.replay?.frames?.length);
+  $("step-results").hidden = !available;
+  $("backtest-replay").hidden = !available;
+}
+
 function clearResult(message = "No run yet", stale = false) {
   stopPlayback();
   app.replay = null;
@@ -350,6 +348,8 @@ function clearResult(message = "No run yet", stale = false) {
   });
   $("run-identity").hidden = true;
   $("result-state").textContent = stale ? "Configuration changed" : "No result";
+  $("sharpe-ratio").textContent = "—";
+  $("sharpe-detail").textContent = "";
   $("status").textContent = message;
   $("impact-warning").hidden = true;
   if (app.mode === "kuru_lp") {
@@ -359,11 +359,8 @@ function clearResult(message = "No run yet", stale = false) {
     $("scenario-badge").textContent = `${shape} · Kuru LP`;
     $("scenario-badge").classList.remove("caution");
   }
-  ["price-chart", "equity-chart"].forEach((id) => {
-    const canvas = $(id);
-    const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
-  });
+  window.LabChart?.clear();
+  syncReplayVisibility();
 }
 
 function markConfigurationChanged() {
@@ -372,6 +369,7 @@ function markConfigurationChanged() {
   app.previewRevision += 1;
   cancelCurrentJob().catch(() => {});
   app.running = false;
+  app.loadingSaved = false;
   app.generatedGrid = null;
   app.gridValidation = null;
   $("minimum-mon").textContent = "Minimum MON —";
@@ -403,6 +401,7 @@ async function pollBacktestJob(job, token) {
       throw new Error("Backtest request was superseded.");
     }
     if (!response.ok) throw new Error(status.error || `Job status failed with HTTP ${response.status}.`);
+    window.LabJobs?.backtest(job.runId, status);
     const processed = Number(status.processed_events || 0).toLocaleString();
     const total = status.total_events == null ? "?" : Number(status.total_events).toLocaleString();
     const percentComplete = Number(status.percent_complete || 0).toFixed(1);
@@ -451,6 +450,9 @@ function buildKuruRequest() {
 }
 
 function applyKuruResponse(response) {
+  if (!Array.isArray(response.compact_timeline) || !response.compact_timeline.length) {
+    throw new Error("This backtest has no replay frames.");
+  }
   app.replay = {
     engine: response.engine,
     interval: response.normalized_configuration.interval,
@@ -463,6 +465,7 @@ function applyKuruResponse(response) {
     summary_sha256: response.summary_sha256,
     timeline_sha256: response.timeline_sha256,
   };
+  syncReplayVisibility();
   app.frameIndex = 0;
   app.chartCache.clear();
   updateRunHeader();
@@ -475,6 +478,62 @@ function applyKuruResponse(response) {
   $("scrubber").value = "0";
   $("total-frames").textContent = app.replay.frames.length.toLocaleString();
   renderFrame(0);
+}
+
+async function refreshSavedBacktests() {
+  const response = await fetch("/api/saved-backtests", { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "Cannot read saved backtests.");
+  const select = $("saved-run-select"), previous = select.value;
+  select.replaceChildren();
+  const blank = document.createElement("option");
+  blank.value = ""; blank.textContent = payload.runs.length ? "Choose a completed run" : "No completed runs saved";
+  select.append(blank);
+  for (const run of payload.runs) {
+    const option = document.createElement("option"), config = run.configuration;
+    option.value = run.run_id;
+    option.textContent = `${config.shape} · ${config.from_block ?? run.interval?.from_block ?? config.interval}–${config.to_block ?? run.interval?.to_block ?? ""} · ${signedMoney(run.results.strategy_pnl)} · ${run.run_id}`;
+    select.append(option);
+  }
+  select.value = payload.runs.some(run => run.run_id === previous) ? previous : "";
+  $("saved-run-status").textContent = `${payload.runs.length} saved runs${payload.skipped_invalid ? ` · ${payload.skipped_invalid} incomplete or invalid runs hidden` : ""}`;
+  setRunButtonState();
+}
+
+async function loadSavedBacktest() {
+  const runId = $("saved-run-select").value;
+  if (!runId || app.running) return;
+  await cancelCurrentJob();
+  stopPlayback();
+  const token = app.requestGate.begin();
+  clearResult("Loading saved results…");
+  app.running = true; app.loadingSaved = true; setRunButtonState();
+  try {
+    const response = await fetch(`/api/saved-backtests/${encodeURIComponent(runId)}`, { cache: "no-store" });
+    const result = await response.json();
+    if (!app.requestGate.accepts(token)) return;
+    if (!response.ok) throw new Error(result.error || "Cannot load this saved run.");
+    const config = result.normalized_configuration;
+    app.marketAddress = config.market; app.amountDriver = config.amount_driver || "both";
+    setRangeInputs(config.from_block ?? result.interval.from_block, config.to_block ?? result.interval.to_block);
+    for (const [id, key] of [["liquidity-shape", "shape"], ["minimum-price", "minimum_price"],
+      ["maximum-price", "maximum_price"], ["flip-spread", "fee_percent"], ["mon-amount", "mon_amount"], ["usdc-amount", "usdc_amount"]]) $(id).value = config[key];
+    $("absolute-range-mode").checked = true;
+    await refreshRangeMetadata();
+    if (!app.requestGate.accepts(token)) return;
+    applyKuruResponse(result);
+    $("saved-run-status").textContent = `Loaded ${result.run_id}. No simulation was started.`;
+    $("status").textContent = `Saved results · ${result.run_id}`;
+    await app.workflow.show("results");
+  } catch (error) {
+    if (app.requestGate.accepts(token)) {
+      clearResult(error.message); $("saved-run-status").textContent = error.message;
+    }
+  } finally {
+    if (app.requestGate.accepts(token)) {
+      app.running = false; app.loadingSaved = false; setRunButtonState();
+    }
+  }
 }
 
 async function runKuruBacktest() {
@@ -523,6 +582,7 @@ async function runKuruBacktest() {
     const parsedAt = performance.now();
     if (!app.requestGate.accepts(token) || app.mode !== "kuru_lp") return;
     applyKuruResponse(result);
+    refreshSavedBacktests().catch(error => { $("saved-run-status").textContent = error.message; });
     app.frontendTimings = {
       total_request_seconds: (parsedAt - requestStarted) / 1000,
       result_fetch_seconds: (fetchedAt - resultStarted) / 1000,
@@ -554,7 +614,7 @@ function updateRunHeader() {
   const config = replay.config || {};
   $("run-title").textContent = config.from_block != null
     ? `MON / USDC · blocks ${config.from_block}–${config.to_block}`
-    : `MON / USDC · ${regimeLabels[replay.interval] || replay.interval}`;
+    : `MON / USDC · ${replay.interval}`;
   const badge = $("scenario-badge");
   const shape = replay.config.shape ? replay.config.shape.replace("bid_ask", "Bid-Ask").replace(/^./, (value) => value.toUpperCase()) : "";
   badge.textContent = `${shape} · Kuru LP`;
@@ -571,6 +631,10 @@ function updateRunHeader() {
 
 function updateResults() {
   const result = app.replay.results;
+  const sharpe = ReplayAnalytics.sharpe(app.replay.frames);
+  $("sharpe-ratio").textContent = sharpe.value == null ? "—" : sharpe.value.toFixed(3);
+  $("sharpe-detail").textContent = `${sharpe.sample_count} one-minute returns · not annualized`;
+  $("sharpe-ratio").title = sharpe.reason;
   setSignedMetric("strategy-pnl", result.strategy_pnl);
   setSignedMetric("hold-pnl", result.hold_pnl);
   setSignedMetric("excess-pnl", result.excess_pnl);
@@ -633,7 +697,7 @@ function renderFrame(index) {
   const frame = app.replay.frames[app.frameIndex];
   $("scrubber").value = String(app.frameIndex);
   $("current-frame").textContent = (app.frameIndex + 1).toLocaleString();
-  $("frame-time").textContent = `${new Date(frame.timestamp).toLocaleString()} · Block ${Number(frame.block).toLocaleString()} · Mid ${price(frame.midpoint)}`;
+  $("frame-time").textContent = `${new Date(frame.timestamp).toISOString().replace("T", " ")} · Block ${Number(frame.block).toLocaleString()} · Mid ${price(frame.midpoint)}`;
   $("block-label").textContent = `Block ${Number(frame.block).toLocaleString()}`;
   const actionText = [frame.placements.length ? `${frame.placements.length} placed` : "", frame.activations.length ? `${frame.activations.length} active` : "", frame.cancellations.length ? `${frame.cancellations.length} canceled` : "", frame.fills.length ? `${frame.fills.length} filled` : ""].filter(Boolean).join(" · ");
   $("frame-actions").textContent = actionText || "Market update only";
@@ -645,8 +709,11 @@ function renderFrame(index) {
   app.frontendTimings.last_chart_render_milliseconds = performance.now() - chartStarted;
 }
 
+// Restore the original cached Canvas replay renderer. The history chart is
+// independent; its candle period must not collapse the replay into one point.
 function chartScale(values, width, height, padding) {
   const valid = values.filter(Number.isFinite);
+  if (!valid.length) valid.push(0, 1);
   let minimum = Math.min(...valid);
   let maximum = Math.max(...valid);
   const span = Math.max(maximum - minimum, Math.abs(maximum) * 0.002, 0.000001);
@@ -657,6 +724,15 @@ function chartScale(values, width, height, padding) {
     y: (value) => padding.top + (maximum - value) / (maximum - minimum) * (height - padding.top - padding.bottom),
     minimum, maximum,
   };
+}
+
+function replayTimeScale(frames, scale) {
+  const start = Date.parse(frames[0].timestamp), end = Date.parse(frames.at(-1).timestamp);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error("Replay timestamps are missing.");
+  const width = scale.x(frames.length - 1, frames.length) - scale.x(0, frames.length);
+  const left = scale.x(0, frames.length);
+  return {...scale, timeX: stamp => left + (stamp - start) / Math.max(1, end - start) * width,
+    x: index => left + (Date.parse(frames[index].timestamp) - start) / Math.max(1, end - start) * width};
 }
 
 function drawGrid(context, width, height, padding, scale, formatter) {
@@ -670,10 +746,22 @@ function drawGrid(context, width, height, padding, scale, formatter) {
   }
 }
 
+function drawReplayDates(context, frames, scale, height) {
+  const first=Date.parse(frames[0].timestamp),last=Date.parse(frames.at(-1).timestamp);
+  context.fillStyle="#88929a";context.font="9px Inter, system-ui, sans-serif";
+  for(let i=0;i<3;i++){
+    const stamp=first+(last-first)*i/2;
+    context.textAlign=i===0?"left":i===2?"right":"center";
+    context.fillText(new Date(stamp).toISOString().slice(5,16).replace("T"," ")+" UTC",scale.timeX(stamp),height-4);
+  }
+  context.textAlign="left";
+}
+
 function drawLine(context, frames, key, scale, color, lineWidth = 1.5) {
   context.beginPath(); context.strokeStyle = color; context.lineWidth = lineWidth;
   let started = false;
   frames.forEach((frame, index) => {
+    if (frame[key] == null) { started = false; return; }
     const value = Number(frame[key]);
     if (!Number.isFinite(value)) return;
     const x = scale.x(index, frames.length); const y = scale.y(value);
@@ -713,24 +801,23 @@ function drawPriceChart() {
   const frames = app.replay.frames;
   const padding = { left: 58, right: 14, top: 12, bottom: 22 };
   const layer = chartLayer("price", width, height, (layerContext) => {
-    const scale = chartScale(frames.flatMap((frame) => [Number(frame.bid), Number(frame.ask), Number(frame.midpoint)]), width, height, padding);
+    const prices = frames.flatMap(frame => [frame.bid, frame.ask, ...(frame.fills || []).map(fill => fill.price)]);
+    const scale = replayTimeScale(frames, chartScale(prices.map(value => value == null ? NaN : Number(value)), width, height, padding));
     drawLine(layerContext, frames, "bid", scale, "#8894ff", 1.2);
-    drawLine(layerContext, frames, "midpoint", scale, "#ff874a", 2.1);
     drawLine(layerContext, frames, "ask", scale, "#f2aa79", 1.2);
-    frames.forEach((frame, index) => frame.fills.forEach((fill) => {
-      layerContext.beginPath(); layerContext.fillStyle = fill.side === "buy" ? "#8894ff" : "#ed8d8d";
-      layerContext.arc(scale.x(index, frames.length), scale.y(Number(fill.price)), 3.5, 0, Math.PI * 2); layerContext.fill();
-    }));
     return { scale };
   });
   const scale = layer.scale;
   drawGrid(context, width, height, padding, scale, (value) => value.toFixed(5));
   drawLayerPrefix(context, layer, width, height, app.frameIndex, frames.length);
-  activeOrdersAt(app.frameIndex).forEach((order) => {
-    const y = scale.y(Number(order.price));
-    context.setLineDash([5, 4]); context.strokeStyle = order.side === "buy" ? "#8894ff" : "#f2aa79";
-    context.beginPath(); context.moveTo(width * 0.76, y); context.lineTo(width - padding.right, y); context.stroke(); context.setLineDash([]);
-  });
+  const now = Date.parse(frames[app.frameIndex].timestamp);
+  for (const frame of frames.slice(0, app.frameIndex + 1)) for (const fill of frame.fills || []) {
+    const stamp = Date.parse(fill.timestamp || frame.timestamp);
+    if (!Number.isFinite(stamp) || stamp > now) continue;
+    context.beginPath(); context.fillStyle = ["buy", "bid"].includes(fill.side) ? "#8894ff" : "#ed8d8d";
+    context.arc(scale.timeX(stamp), scale.y(Number(fill.price)), 3.5, 0, Math.PI * 2); context.fill();
+  }
+  drawReplayDates(context, frames, scale, height);
 }
 
 function drawEquityChart() {
@@ -743,8 +830,9 @@ function drawEquityChart() {
       Number(frame.marked_value),
       initialValue + Number(frame.hold_baseline_pnl),
     ]);
-    const scale = chartScale(values, width, height, padding);
+    const scale = replayTimeScale(frames, chartScale(values, width, height, padding));
     const equityFrames = frames.map((frame) => ({
+      timestamp: frame.timestamp,
       marked_value: frame.marked_value,
       hold_value: initialValue + Number(frame.hold_baseline_pnl),
     }));
@@ -755,6 +843,7 @@ function drawEquityChart() {
   const scale = layer.scale;
   drawGrid(context, width, height, padding, scale, (value) => value.toFixed(2));
   drawLayerPrefix(context, layer, width, height, app.frameIndex, frames.length);
+  drawReplayDates(context, frames, scale, height);
 }
 
 function stopPlayback() {
@@ -789,65 +878,13 @@ async function setMode(mode) {
   document.querySelectorAll(".mode-button").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
   $("lp-controls").hidden = mode !== "kuru_lp";
   $("form-help").textContent = "Run a local Kuru LP simulation with this exact SDK-generated position.";
-    $("regime").disabled = false;
     await renderDistributionPreview();
     clearResult("No Kuru LP run yet");
   setRunButtonState();
 }
 
 function drawHistoryRangeChart() {
-  if (!app.tradeChart) return;
-  const points = app.tradeChart.points;
-  const canvas = $("history-range-chart");
-  const { context, width, height } = prepareCanvas(canvas);
-  if (!points.length) return;
-  const first = app.tradeChart.trade_only_coverage.from_block;
-  const last = app.tradeChart.trade_only_coverage.to_block;
-  const prices = points.map((item) => Number(item.price));
-  const low = Math.min(...prices);
-  const high = Math.max(...prices);
-  const x = (block) => 5 + (Number(block) - first) / Math.max(1, last - first) * (width - 10);
-  const plotBottom = height - 38;
-  const y = (value) => 5 + (high - Number(value)) / Math.max(1e-12, high - low) * (plotBottom - 10);
-  context.fillStyle = "rgba(255,135,74,.025)";
-  context.fillRect(0, 0, width, plotBottom);
-  // Coverage can expand after this chart file was built. Use the backend's
-  // verified manifest, not stale coverage embedded in a Trade-only artifact.
-  (app.intervalMetadata?.validated_l3_coverage || []).forEach((segment) => {
-    context.fillStyle = "rgba(255,135,74,.045)";
-    context.fillRect(x(segment.from_block), 0, Math.max(1, x(segment.to_block) - x(segment.from_block)), plotBottom);
-  });
-  context.strokeStyle = "#bba38e";
-  context.lineWidth = 1.2;
-  context.beginPath();
-  points.forEach((item, index) => {
-    const px = x(item.block); const py = y(item.price);
-    if (index === 0) context.moveTo(px, py); else context.lineTo(px, py);
-  });
-  context.stroke();
-  const selectedFrom = Number($("from-block").value || first);
-  const selectedTo = Number($("to-block").value || last);
-  context.fillStyle = "rgba(255,135,74,.10)";
-  context.fillRect(x(selectedFrom), 0, Math.max(1, x(selectedTo) - x(selectedFrom)), plotBottom);
-  context.strokeStyle = "#ff874a";
-  context.beginPath();
-  let started = false;
-  points.filter((point) => point.block >= selectedFrom && point.block <= selectedTo).forEach((point) => {
-    if (!started) { context.moveTo(x(point.block), y(point.price)); started = true; }
-    else context.lineTo(x(point.block), y(point.price));
-  });
-  context.stroke();
-  const ticks = Math.max(2, Math.min(5, Math.floor(width / 130)));
-  context.fillStyle = "#a3978d";
-  context.font = "9px Inter, system-ui, sans-serif";
-  for (let index = 0; index <= ticks; index += 1) {
-    const block = first + (last - first) * index / ticks;
-    const point = points.reduce((best, row) => Math.abs(row.block - block) < Math.abs(best.block - block) ? row : best, points[0]);
-    const date = new Date(Number(point.timestamp) * 1000);
-    context.textAlign = index === 0 ? "left" : index === ticks ? "right" : "center";
-    context.fillText(date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }), x(block), height - 17);
-    context.fillText(date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }), x(block), height - 4);
-  }
+  window.LabChart?.select(Number($("from-block").value), Number($("to-block").value));
 }
 
 function renderPeriodSummary() {
@@ -937,40 +974,46 @@ async function refreshRangeMetadata() {
   if (app.mode === "kuru_lp") await renderDistributionPreview();
 }
 
-async function selectGoldenPreset() {
-  const preset = app.intervalMetadata[$("regime").value];
-  setRangeInputs(preset.from_block, preset.to_block);
-  markConfigurationChanged();
-  await refreshRangeMetadata();
-}
-
 async function initialize() {
   try {
-    const [intervalResponse, chartResponse] = await Promise.all([
-      fetch("/api/intervals"), fetch(`${DATA_ROOT}/trade_history_chart.json`),
-    ]);
-    if (!intervalResponse.ok) throw new Error("The local backtest API could not load interval metadata.");
-    if (!chartResponse.ok) throw new Error("The local Trade history chart could not be loaded.");
-    const metadata = await intervalResponse.json();
+    const response = await fetch("/api/intervals");
+    if (!response.ok) throw new Error("Cannot load local market coverage.");
+    const metadata = await response.json();
     app.marketAddress = metadata.market;
-    app.intervalMetadata = Object.fromEntries(metadata.intervals.map((item) => [item.name, item]));
-    app.tradeChart = await chartResponse.json();
-    const scope = app.tradeChart.trade_only_coverage;
-    [$("range-start-slider"), $("range-end-slider")].forEach((slider) => {
-      slider.min = "0";
-      slider.max = String(scope.to_block - scope.from_block);
-      slider.step = "1";
-    });
-    const initial = app.intervalMetadata[$("regime").value];
-    setRangeInputs(initial.from_block, initial.to_block);
+    app.intervalMetadata = metadata;
+    const coverage = metadata.validated_l3_coverage;
+    if (!coverage.length) throw new Error("No backtest-ready local range is available.");
+    const first = coverage[0].from_block, last = coverage.at(-1).to_block;
+    app.tradeChart = {trade_only_coverage:{from_block:first,to_block:last},points:[]};
+    window.LabBacktestCoverage = coverage;
+    setRangeInputs(first, last);
     await refreshRangeMetadata();
     await setMode("kuru_lp");
-  } catch (error) {
-    $("status").textContent = error.message;
-    $("impact-warning").hidden = false;
-    $("impact-warning").textContent = "Start a local HTTP server from the project root. Direct file access cannot load replay data.";
-  }
+    PageLoading.ready("backtest");
+  } catch(error) { PageLoading.error(error.message); $("status").textContent=error.message; }
 }
+window.addEventListener("chart-range-selected", event => {
+  if(app.running || !app.tradeChart) return;
+  app.rangeMetadata=null;
+  // Chart selection is allowed outside backtest coverage; the backend decides
+  // eligibility. Never clamp a selected missing range into a valid one.
+  const {from_block,to_block}=event.detail;
+  app.tradeChart.trade_only_coverage.from_block=Math.min(app.tradeChart.trade_only_coverage.from_block,from_block);
+  app.tradeChart.trade_only_coverage.to_block=Math.max(app.tradeChart.trade_only_coverage.to_block,to_block);
+  setRangeInputs(from_block,to_block);
+  markConfigurationChanged();
+  refreshRangeMetadata().catch(error=>clearResult(error.message));
+});
+window.addEventListener("market-candles", event => {
+  if(!app.tradeChart)return;
+  app.tradeChart.points=event.detail.candles.map(b=>({block:b.from_block,timestamp:b.time,price:b.close}));
+  for(const range of event.detail.indexed_ranges||[]){
+    app.tradeChart.trade_only_coverage.from_block=Math.min(app.tradeChart.trade_only_coverage.from_block,range.from_block);
+    app.tradeChart.trade_only_coverage.to_block=Math.max(app.tradeChart.trade_only_coverage.to_block,range.to_block);
+  }
+  setRangeInputs($("from-block").value,$("to-block").value);
+  if(app.replay)renderFrame(app.frameIndex);
+});
 
 $("backtest-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1060,9 +1103,7 @@ $("mon-amount").addEventListener("input", () => {
 $("usdc-amount").addEventListener("input", () => {
   markConfigurationChanged(); renderDistributionPreview();
 });
-$("regime").addEventListener("change", () => {
-  selectGoldenPreset().catch((error) => clearResult(error.message));
-});
+
 [$("range-start-slider"), $("range-end-slider")].forEach((slider) => {
   slider.addEventListener("input", () => {
     const first = app.tradeChart.trade_only_coverage.from_block;
@@ -1086,6 +1127,8 @@ $("regime").addEventListener("change", () => {
 }));
 $("play-button").addEventListener("click", togglePlayback);
 $("scrubber").addEventListener("input", (event) => { stopPlayback(); renderFrame(Number(event.target.value)); });
+$("saved-run-select").addEventListener("change", setRunButtonState);
+$("load-saved-run").addEventListener("click", loadSavedBacktest);
 document.querySelectorAll(".speed-button").forEach((button) => button.addEventListener("click", () => {
   app.speed = Number(button.dataset.speed);
   document.querySelectorAll(".speed-button").forEach((item) => item.classList.remove("active"));
@@ -1096,19 +1139,24 @@ window.addEventListener("resize", () => {
   if (app.generatedGrid && app.gridValidation) drawDistribution(app.generatedGrid, app.gridValidation);
   if (app.replay) renderFrame(app.frameIndex);
 });
+window.addEventListener("page-ready", () => requestAnimationFrame(() => {
+  if (app.generatedGrid && app.gridValidation) drawDistribution(app.generatedGrid, app.gridValidation);
+}));
 
 app.workflow = BacktestWorkflow.create({
   panels: { timeframe: $("step-timeframe"), strategy: $("step-strategy"), results: $("step-results") },
   steps: [...document.querySelectorAll(".step-button")],
+  persistent: true,
   wait: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   reducedMotion: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   onEnter: (step) => {
     if (step !== "results") stopPlayback();
+    syncReplayVisibility();
     document.querySelector(".app-shell").dataset.stage = step;
     if (step === "timeframe") drawHistoryRangeChart();
     if (step === "strategy" && app.generatedGrid && app.gridValidation) drawDistribution(app.generatedGrid, app.gridValidation);
     if (step === "results" && app.replay) renderFrame(app.frameIndex);
-    $(step === "results" ? "run-title" : `${step}-title`).focus({ preventScroll: true });
+    $(step === "results" ? "run-title" : `${step}-title`)?.focus({ preventScroll: true });
   },
 });
 document.querySelectorAll("[data-navigate]").forEach((button) => button.addEventListener("click", () => {
@@ -1117,3 +1165,4 @@ document.querySelectorAll("[data-navigate]").forEach((button) => button.addEvent
 }));
 $("timeframe-next").addEventListener("click", () => app.workflow.show("strategy"));
 initialize();
+refreshSavedBacktests().catch(error => { $("saved-run-status").textContent = error.message; });

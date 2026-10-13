@@ -3,9 +3,11 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@kuru-labs/kuru-sdk": "0.0.95"
+    "@kuru-labs/kuru-sdk": "0.0.95",
+    "lightweight-charts": "5.1.0"
   },
   "scripts": {
+    "build:charts": "esbuild chart_library.js --bundle --minify --platform=browser --format=iife --global-name=LightweightCharts --outfile=../frontend/chart_library.js",
     "fixtures": "node generate_fixtures.js",
     "build:browser": "esbuild browser_adapter.js --bundle --platform=browser --format=iife --global-name=KuruSdkAdapter --outfile=../frontend/kuru_sdk_adapter.js",
     "grid": "node generate_grid_cli.js",

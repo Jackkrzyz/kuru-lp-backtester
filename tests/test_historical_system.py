@@ -134,3 +134,21 @@ def test_existing_three_golden_fixture_hashes_are_unchanged(system) -> None:
         assert partition.sha256 == golden["event_sha"]
         assert checkpoint.block_number == golden["checkpoint"]
         assert checkpoint.sha256 == golden["checkpoint_sha"]
+
+
+def test_trade_statistics_view_matches_full_replay_without_decoding_orders(system, monkeypatch):
+    events, _, _ = system
+    from kuru_backtester.server.backtest_service import period_trade_prices
+    cursor = ReplayCursor(events, MARKET, 109097028, 109107027)
+    expected = period_trade_prices(iter(cursor))
+    from kuru_backtester.engine import l3_vertical_slice as l3
+    decode = l3.decode_event
+    decoded = []
+    def trades_only(raw):
+        event = decode(raw)
+        assert event.name == "Trade"
+        decoded.append(event)
+        return event
+    monkeypatch.setattr(l3, "decode_event", trades_only)
+    assert period_trade_prices(cursor) == expected
+    assert len(decoded) == 1162

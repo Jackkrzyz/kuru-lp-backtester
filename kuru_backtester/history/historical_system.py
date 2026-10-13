@@ -17,6 +17,10 @@ from typing import Any, Iterable, Iterator
 from kuru_backtester.engine import kuru_lp
 from kuru_backtester.engine import l3_vertical_slice as l3
 from kuru_backtester.engine import strategy_vertical_slice as strategy
+from kuru_backtester.history import reconstruction_profiles as profiles
+from kuru_backtester.engine.rebuild_from_chain import EVENTS_BY_TOPIC
+
+TRADE_TOPIC = next(topic for topic, spec in EVENTS_BY_TOPIC.items() if spec.name == "Trade")
 
 
 from kuru_backtester.paths import ROOT
@@ -366,6 +370,7 @@ def deserialize_book(payload: dict[str, Any]) -> l3.L3Book:
         for item in payload["levels"]
     }
     book.check_invariants()
+    profiles.restore_head_metadata(book, payload.get("contract_head_prev", []))
     return book
 
 
@@ -389,11 +394,18 @@ class ReconstructionEngine:
             replay_from = checkpoint.block_number + 1
             self.events.require_coverage(market, replay_from, state_block)
             timestamps = self.events.timestamps(market, replay_from, state_block)
-            for event in self.events.iter_events(market, replay_from, state_block):
-                l3.apply_event(book, event, parameters["price_precision"])
-                applied += 1
-                timestamp = timestamps[event.block_number]
-                timestamp_source_block = event.block_number
+            for partition in self.events.selected_partitions(replay_from, state_block):
+                summary = self.events.validation.verify_partition(partition, market)
+                versions = {item["implementation_code_sha256"] for item in summary.get("contract_guards", [])}
+                if len(versions) > 1:
+                    raise HistoricalRangeError("Mixed reconstruction implementations in one partition")
+                implementation = next(iter(versions), profiles.CURRENT_IMPLEMENTATION)
+                for event in self.events.iter_events(market, max(replay_from, partition.from_block),
+                                                      min(state_block, partition.to_block)):
+                    profiles.apply_event(book, event, parameters["price_precision"], implementation)
+                    applied += 1
+                    timestamp = timestamps[event.block_number]
+                    timestamp_source_block = event.block_number
         book.check_invariants()
         return ReconstructedStart(
             market=market.lower(),
@@ -426,6 +438,29 @@ class ReplayCursor(Iterable[l3.ReplayEvent]):
 
     def __iter__(self) -> Iterator[l3.ReplayEvent]:
         return self.store.iter_events(self.market, self.from_block, self.to_block)
+
+    def trade_events(self) -> Iterator[l3.ReplayEvent]:
+        """Read Trade statistics without decoding dense order lifecycle events.
+
+        This view is for display statistics. Strategy replay uses __iter__ and
+        still receives every canonical event in its original order.
+        """
+        self.store.require_coverage(self.market, self.from_block, self.to_block)
+        for partition in self.store.selected_partitions(self.from_block, self.to_block):
+            self.store.validation.verify_partition(partition, self.market)
+            with partition.path.open(encoding="utf-8") as source:
+                for line in source:
+                    if TRADE_TOPIC not in line.lower():
+                        continue
+                    raw = json.loads(line)
+                    block = int(raw["block_number"])
+                    if block < self.from_block:
+                        continue
+                    if block > self.to_block:
+                        break
+                    event = l3.decode_event(raw)
+                    if event.name == "Trade":
+                        yield event
 
     def event_count(self) -> int:
         return self.store.event_count(self.market, self.from_block, self.to_block)

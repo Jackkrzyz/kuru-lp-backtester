@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import pytest
 
-from kuru_backtester.server.data_suite import DataSuite, DataSuiteError, merge_ranges
+from kuru_backtester.server.data_suite import DataSuite, DataSuiteError, merge_ranges, missing_ranges
 from kuru_backtester.engine.rebuild_from_chain import DEPLOYMENT_BLOCK, MARKET_ADDRESS
 from kuru_backtester.history.index_history import EVENT_TOPICS, SCHEMA_VERSION
 
@@ -17,6 +17,14 @@ def test_range_union_preserves_gaps():
     assert merge_ranges([{"from_block": 10, "to_block": 20}, {"from_block": 15, "to_block": 25},
                          {"from_block": 30, "to_block": 40}]) == [
         {"from_block": 10, "to_block": 25}, {"from_block": 30, "to_block": 40}]
+
+
+def test_missing_ranges_are_bounded_and_do_not_count_overlap_twice():
+    assert missing_ranges(10, 40, [{"from_block": 0, "to_block": 15},
+                                  {"from_block": 12, "to_block": 20},
+                                  {"from_block": 30, "to_block": 99}]) == [(21, 29)]
+    assert missing_ranges(10, 40, []) == [(10, 40)]
+    assert missing_ranges(10, 40, [{"from_block": 10, "to_block": 40}]) == []
 
 
 def test_new_server_observes_saved_job_without_claiming_ownership(tmp_path):
@@ -44,7 +52,8 @@ def test_inventory_separates_trade_discovery_and_partial_l3(tmp_path):
     assert value["downloaded_ranges"] == [{"from_block": first, "to_block": first + 9}]
     assert value["verified_blocks"] == 0
     assert not value["scope_is_finalized"]
-    assert value["total_saved_bytes"] == sum(path.stat().st_size for path in (tmp_path / ".cache").rglob("*") if path.is_file())
+    assert value["total_saved_bytes"] == sum(path.stat().st_size for path in (tmp_path / ".cache").rglob("*")
+                                            if path.is_file() and path != suite.directory / "inventory.json")
 
 
 def test_manifest_missing_files_not_counted_and_overlaps_deduplicated(tmp_path):
@@ -118,12 +127,103 @@ def test_invalid_download_cannot_spawn(ready, change):
     assert not calls
 
 
+def test_verification_runs_without_envio_and_does_not_stop_download(ready, monkeypatch):
+    suite, calls = ready
+    download = suite.start(request())
+    source = suite.directory / "jobs" / download["job_id"]
+    save(source / "progress.json", {"phase": "downloading", "downloaded_block": request()["to_block"]})
+    monkeypatch.delenv("ENVIO_API_TOKEN")
+    created = suite.start_verification({"source_job_id": download["job_id"]})
+    command, options = calls[-1]
+    assert "kuru_backtester.history.verify_download" in command
+    assert "--download-only" not in command and "--hypersync-url" not in command
+    assert "ENVIO_API_TOKEN" not in options["env"]
+    assert command[command.index("--source-job") + 1] == str(source)
+    assert suite.process.poll() is None
+    assert suite.status()["verifications"][0]["running"]
+    with pytest.raises(DataSuiteError, match="already running"):
+        suite.start_verification({"source_job_id": download["job_id"]})
+    suite.stop_verification()
+    assert suite.process.poll() is None
+    assert suite.status()["verifications"][0]["phase"] == "stopped"
+    assert suite.start_verification({"source_job_id": download["job_id"]})["job_id"] == created["job_id"]
+
+
+def test_verification_rejects_incomplete_bounds_and_path_traversal(ready):
+    suite, calls = ready
+    download = suite.start(request())
+    payload = {"source_job_id": download["job_id"]}
+    with pytest.raises(DataSuiteError, match="No complete"):
+        suite.start_verification(payload)
+    source = suite.directory / "jobs" / download["job_id"]
+    save(source / "progress.json", {"downloaded_block": request()["to_block"]})
+    for change in ({"source_job_id": "../source"}, {"from_block": True}, {"from_block": DEPLOYMENT_BLOCK+1},
+                   {"to_block": DEPLOYMENT_BLOCK+100}):
+        with pytest.raises(DataSuiteError):
+            suite.start_verification({**payload, **change})
+    assert len(calls) == 1
+
+
+def test_all_verification_starts_without_scan_or_envio_and_stops_queue(ready, monkeypatch):
+    suite, calls = ready
+    download = suite.start(request())
+    monkeypatch.delenv("ENVIO_API_TOKEN")
+    monkeypatch.setattr(suite, "_scan_inventory", lambda: pytest.fail("Start must not scan the archive"))
+    result = suite.start_all_verification()
+    assert "kuru_backtester.history.verify_all_downloads" in calls[-1][0]
+    assert "ENVIO_API_TOKEN" not in calls[-1][1]["env"]
+    assert suite.verification_queue_status()["running"]
+    assert suite.verification_queue_status()["phase"] == "starting"
+    with pytest.raises(DataSuiteError, match="already running"):
+        suite.start_all_verification()
+    with pytest.raises(DataSuiteError, match="already running"):
+        suite.start_verification({"source_job_id": download["job_id"]})
+    suite.stop_verification()
+    assert suite.verification_queue_status()["phase"] == "stopped"
+    assert suite.process.poll() is None
+    assert suite.start_all_verification()["job_id"] != result["job_id"]
+    suite.close()
+    assert suite.verification_process.poll() == -15
+
+
+def test_saved_queue_does_not_restart_on_status_read(tmp_path):
+    suite = DataSuite(tmp_path, spawn=lambda *a, **k: pytest.fail("No automatic restart"))
+    queue = suite.directory / "verification_queues/saved"
+    save(queue / "request.json", {})
+    save(queue / "progress.json", {"phase": "verifying", "total_partitions": 10, "completed_partitions": 2})
+    status = suite.verification_queue_status()
+    assert status["phase"] == "unmanaged" and not status["running"]
+    assert status["progress"]["completed_partitions"] == 2
+
+
+def test_queue_exposes_current_verification_progress(ready):
+    suite, _ = ready
+    queued = suite.start_all_verification()
+    current = "a" * 16
+    save(suite.directory / "verification_queues" / queued["job_id"] / "progress.json",
+         {"phase": "verifying", "current_job_id": current, "completed_partitions": 2, "total_partitions": 5})
+    save(suite.directory / "verifications" / current / "request.json", {"from_block": 10, "to_block": 20})
+    save(suite.directory / "verifications" / current / "progress.json",
+         {"phase": "rpc_parity", "reconstructed_events": 123, "l2_checks_current_partition": 3})
+    status = suite.status()
+    assert status["verifications"][0]["running"] is True
+    assert status["verifications"][0]["phase"] == "rpc_parity"
+    assert status["verification_queue"]["current_progress"]["l2_checks_current_partition"] == 3
+    suite.stop_verification()
+    assert suite.status()["verification_queue"]["running"] is False
+
+
 def test_env_file_reads_only_known_keys(tmp_path, monkeypatch):
     monkeypatch.delenv("ENVIO_API_TOKEN", raising=False)
-    (tmp_path / ".env").write_text('ENVIO_API_TOKEN="local-token" # secret\nUNRELATED_KEY=ignored\n')
+    monkeypatch.delenv("KURU_RPC_TIMESTAMP_BATCH_SIZE", raising=False)
+    monkeypatch.setenv("KURU_RPC_MIN_REQUEST_INTERVAL", "0.5")
+    (tmp_path / ".env").write_text('ENVIO_API_TOKEN="local-token" # secret\nUNRELATED_KEY=ignored\n'
+                                  'KURU_RPC_TIMESTAMP_BATCH_SIZE=25\nKURU_RPC_MIN_REQUEST_INTERVAL=0.1\n')
     environment = DataSuite(tmp_path).environment()
     assert environment["ENVIO_API_TOKEN"] == "local-token"
     assert "UNRELATED_KEY" not in environment
+    assert environment["KURU_RPC_TIMESTAMP_BATCH_SIZE"] == "25"
+    assert environment["KURU_RPC_MIN_REQUEST_INTERVAL"] == "0.5"
 
 
 def test_refresh_finalized_uses_only_two_rpc_calls(tmp_path, monkeypatch):
@@ -151,6 +251,43 @@ def test_data_suite_ui_request_and_coverage_rendering():
     assert "tests passed" in result.stdout
 
 
+def test_http_combined_preparation_starts_both_workers_and_stops_them(ready, monkeypatch):
+    import threading
+    import time
+    from http.server import ThreadingHTTPServer
+    from urllib.request import urlopen, Request
+    from kuru_backtester.server.backtest_server import BacktestHandler
+    from kuru_backtester.history import verify_all_downloads
+    suite, calls = ready
+    monkeypatch.setattr(verify_all_downloads, "downloaded_partitions", lambda *a: [])
+    monkeypatch.setattr(verify_all_downloads, "verified_ranges", lambda *a: [])
+    handler = type("PreparationTestHandler", (BacktestHandler,), {"data_suite": suite})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        result = json.load(urlopen(Request(base + "/api/data-suite/prepare", data=json.dumps(request()).encode(),
+                                          headers={"Content-Type": "application/json"})))
+        assert result["configuration"]["to_block"] == request()["to_block"]
+        deadline = time.time() + 3
+        while len(calls) < 2:
+            assert time.time() < deadline
+            time.sleep(0.01)
+        assert calls[0][0][2] == "kuru_backtester.history.verify_all_downloads"
+        assert calls[1][0][2] == "kuru_backtester.history.full_history"
+        value = json.load(urlopen(base + "/api/data-suite"))
+        assert value["pipeline"]["running"]
+        stopped = json.load(urlopen(Request(base + "/api/data-suite/prepare-stop", data=b"{}")))
+        assert stopped["job_id"] == result["job_id"]
+        suite._pipeline_thread.join(3)
+        assert suite.process.poll() == suite.verification_process.poll() == -15
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
 def test_http_download_controls_receive_exact_range(ready):
     import threading
     from http.server import ThreadingHTTPServer
@@ -166,11 +303,28 @@ def test_http_download_controls_receive_exact_range(ready):
     try:
         initial = json.load(urlopen(base + "/api/data-suite"))
         assert initial["verified_blocks"] in (None, 0)
+        page = urlopen(base + "/").read()
+        assert b"kuruLab" in page  # Partial history does not redirect or lock the product.
+        assert b'data-load-parts="backtest,inventory" hidden' in page
         assert calls == []
         created = json.load(urlopen(Request(base + "/api/data-suite/download", data=json.dumps(request()).encode(),
                                            headers={"Content-Type": "application/json"})))
         assert created["request"]["from_block"] == DEPLOYMENT_BLOCK
         assert len(calls) == 1
+        save(suite.directory / "jobs" / created["job_id"] / "progress.json", {"downloaded_block": request()["to_block"]})
+        verified = json.load(urlopen(Request(base + "/api/data-suite/verify",
+            data=json.dumps({"source_job_id": created["job_id"]}).encode(), headers={"Content-Type": "application/json"})))
+        assert verified["request"]["to_block"] == request()["to_block"]
+        assert calls[-1][0][2] == "kuru_backtester.history.verify_download"
+        json.load(urlopen(Request(base + "/api/data-suite/verify-stop", data=b"{}")))
+        assert suite.process.poll() is None
+        queued = json.load(urlopen(Request(base + "/api/data-suite/verify-all", data=b"{}")))
+        assert queued["request"]["scope"] == "completed_local_l3"
+        assert calls[-1][0][2] == "kuru_backtester.history.verify_all_downloads"
+        with pytest.raises(HTTPError) as duplicate:
+            urlopen(Request(base + "/api/data-suite/verify-all", data=b"{}"))
+        assert duplicate.value.code == 400
+        json.load(urlopen(Request(base + "/api/data-suite/verify-stop", data=b"{}")))
         with pytest.raises(HTTPError) as error:
             urlopen(Request(base + "/api/data-suite/stop", data=b"{}", headers={"Origin": "https://foreign.test"}))
         assert error.value.code == 403
@@ -250,6 +404,118 @@ def test_cache_age_starts_after_scan_and_refresh_preserves_previous_totals(tmp_p
     assert snapshot["inventory_error"] == "disk scan unavailable"
     assert snapshot["inventory_refreshing"] is False
     assert snapshot["inventory_updated_at"] == previous["inventory_updated_at"]
+
+
+def test_restart_shows_saved_inventory_while_current_scan_is_blocked(tmp_path, monkeypatch):
+    import threading
+    first = DataSuite(tmp_path)
+    expected = first.inventory()
+    restarted = DataSuite(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    original = restarted._scan_inventory
+    def slow_scan():
+        entered.set()
+        assert release.wait(5)
+        return original()
+    monkeypatch.setattr(restarted, "_scan_inventory", slow_scan)
+    try:
+        value = restarted.inventory_snapshot()
+        assert entered.wait(1)
+        assert value["inventory_ready"] is True
+        assert value["inventory_from_saved"] is True
+        assert value["inventory_refreshing"] is True
+        assert value["total_saved_bytes"] == expected["total_saved_bytes"]
+    finally:
+        release.set()
+        restarted._inventory_thread.join(2)
+        restarted.close()
+    assert not restarted.inventory_snapshot()["inventory_from_saved"]
+
+
+def test_download_progress_updates_coverage_without_recursive_scan(ready):
+    suite, _ = ready
+    suite.inventory()
+    created = suite.start(request())
+    saved = suite.directory / "jobs" / created["job_id"]
+    save(saved / "progress.json", {"downloaded_block": request()["to_block"]})
+    value = suite.status()
+    assert value["downloaded_ranges"] == [{"from_block": request()["from_block"], "to_block": request()["to_block"]}]
+    assert value["downloaded_blocks"] == 10
+
+
+def test_verification_coverage_updates_from_committed_progress_without_disk_scan(ready):
+    import time
+    suite, _ = ready
+    suite.inventory()
+    directory = suite.directory / "verifications/0123456789abcdef"
+    save(directory / "request.json", {**request(), "market": MARKET_ADDRESS})
+    progress = {"phase": "partition_validated", "validated_block": DEPLOYMENT_BLOCK + 4,
+                "updated_at": time.time(),
+                "validated_events": 0, "event_parity_status": "pass", "queue_invariant_failures": 0}
+    save(directory / "progress.json", progress)
+    value = suite.status()
+    assert value["verified_ranges"] == [{"from_block": DEPLOYMENT_BLOCK, "to_block": DEPLOYMENT_BLOCK + 4}]
+    assert value["verified_blocks"] == 5, "Empty but verified partitions still count"
+    save(directory / "progress.json", {**progress, "event_parity_status": "failed"})
+    assert suite.status()["verified_ranges"] == []
+
+
+def test_local_preparation_needs_no_envio_token_or_head(ready, monkeypatch):
+    suite, calls = ready
+    monkeypatch.delenv("ENVIO_API_TOKEN")
+    (suite.directory / "network.json").unlink()
+    refreshed = []
+    monkeypatch.setattr(suite.market_chart, "request_refresh", lambda: refreshed.append(True) or {"phase": "indexing_local_trades"})
+    result = suite.start_local_preparation()
+    assert result["envio_download"] is False
+    assert refreshed == [True]
+    assert len(calls) == 1
+    assert calls[0][0][2] == "kuru_backtester.history.verify_all_downloads"
+    assert suite.process is None, "Local processing cannot start HyperSync"
+
+
+def test_local_processing_http_route_starts_only_rpc_worker(ready, monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import Request,urlopen
+    from kuru_backtester.server.backtest_server import BacktestHandler
+    suite,calls=ready
+    monkeypatch.delenv("ENVIO_API_TOKEN")
+    monkeypatch.setattr(suite.market_chart,"request_refresh",lambda:{"phase":"indexing_local_trades"})
+    handler=type("LocalProcessingHandler",(BacktestHandler,),{"data_suite":suite})
+    server=ThreadingHTTPServer(("127.0.0.1",0),handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        url=f"http://127.0.0.1:{server.server_port}/api/data-suite/prepare-local"
+        response=json.load(urlopen(Request(url,data=b"{}",headers={"Content-Type":"application/json"})))
+        assert response["envio_download"] is False
+        assert response["local_trade_index"]["phase"] == "indexing_local_trades"
+        assert len(calls)==1 and calls[0][0][2]=="kuru_backtester.history.verify_all_downloads"
+    finally:
+        server.shutdown();server.server_close();thread.join(2)
+
+
+def test_queue_shows_promoted_child_partitions_before_group_finishes(ready):
+    suite, _ = ready
+    queued = suite.start_all_verification()
+    current = "0123456789abcdef"
+    path = suite.directory / "verification_queues" / queued["job_id"] / "progress.json"
+    original = {"phase": "verifying", "current_job_id": current, "completed_partitions": 2,
+                "total_partitions": 10, "current_from_block": 100, "current_to_block": 139,
+                "current_partition_blocks": 10, "current_partition_count": 4}
+    save(path, original)
+    child = suite.directory / "verifications" / current / "progress.json"
+    save(child, {"validated_block": 119, "phase": "checkpoint"})
+    assert suite.verification_queue_status()["progress"]["completed_partitions"] == 4
+    assert json.loads(path.read_text()) == original, "Display updates do not rewrite job state"
+    save(child, {"validated_block": 139})
+    assert suite.verification_queue_status()["progress"]["completed_partitions"] == 6
+
+
+@pytest.mark.parametrize("saved", [[], {"schema_version": 1, "inventory": {}}, {"schema_version": 999}])
+def test_invalid_saved_inventory_is_ignored(tmp_path, saved):
+    save(tmp_path / ".cache/data_suite/inventory.json", saved)
+    assert DataSuite(tmp_path).cached is None
 
 
 def test_inventory_ignores_symlinked_files_and_directories(tmp_path):

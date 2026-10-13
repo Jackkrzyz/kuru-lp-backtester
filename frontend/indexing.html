@@ -1,111 +1,30 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kuru · Data suite</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="indexing.css">
-</head>
-<body>
-<main class="app-shell">
-  <div class="shell-heading"><a class="wordmark" href="/">Kuru <span>Data suite</span></a><a class="indexing-link" href="/">Backtest →</a></div>
-  <article class="workflow-card"><div class="workflow-panel">
-  <section class="heading step-heading"><div class="eyebrow">HISTORICAL DATA</div><h1>Onchain history, reconstructed with Envio.</h1><div class="status" aria-live="polite"><span id="status-dot"></span><span id="phase">Connecting</span><span id="freshness"></span></div><p id="error" role="alert" hidden></p></section>
-  <section class="chain-map instrument" aria-label="Live historical data pipeline">
-    <div class="diagram-heading"><span class="eyebrow">ONCHAIN FLOW · PROGRESS TRACE</span><span id="flow-mode">No job selected</span></div>
-    <div class="instrument-top"><span>MON / USDC</span><span id="scope">—</span></div>
-    <div class="process-heading"><h2 id="current-action">No download is running</h2><p id="action-explanation">Start a bounded download to see the actual requests, returned pages, and saved cursors.</p></div>
-    <div class="diagram-viewport">
-    <svg class="chain-diagram" viewBox="0 0 1000 470" role="img" aria-labelledby="flow-title flow-description">
-      <title id="flow-title">Kuru events pass through Envio HyperSync to local storage</title>
-      <desc id="flow-description">Monad blocks contain Kuru contract logs. Envio provides indexed history filtered by market address, event topics, and block range. The downloader receives logs and related timestamps, then saves canonical events and the next block cursor. Reconstruction and independent RPC checks are separate steps.</desc>
-      <defs>
-        <pattern id="diagram-grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#ff874a" stroke-opacity=".045"/></pattern>
-        <marker id="flow-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L6 3L0 6" fill="none" stroke="#95674b"/></marker>
-      </defs>
-      <rect width="1000" height="470" fill="url(#diagram-grid)"/>
-      <g class="flow-node">
-        <rect x="20" y="28" width="230" height="298" rx="16"/>
-        <text x="40" y="57" class="diagram-kicker">01 / ONCHAIN</text><text x="40" y="84" class="diagram-title">Monad</text>
-        <g class="block-chain"><path d="M62 119H204"/><rect x="40" y="101" width="42" height="35" rx="5"/><rect x="105" y="101" width="42" height="35" rx="5"/><rect x="170" y="101" width="42" height="35" rx="5"/><path d="M49 111H69M49 118H64M114 111H134M114 118H129M179 111H199M179 118H194"/></g>
-        <path class="flow-wire" d="M126 136V158" marker-end="url(#flow-arrow)"/>
-        <rect class="contract-box" x="40" y="162" width="190" height="55" rx="8"/>
-        <text x="54" y="184" class="diagram-label">Kuru market contract</text><text id="flow-market" x="54" y="202" class="diagram-mono">No market selected</text>
-        <path class="flow-wire" d="M126 217V232M67 232H188M67 232V240M188 232V240"/>
-        <text x="40" y="256" class="event-label">OrderCreated</text><text x="155" y="256" class="event-label">Trade</text>
-        <text x="40" y="278" class="event-label">Cancellations</text><text x="155" y="278" class="event-label">Flips</text>
-        <text x="40" y="305" class="diagram-muted">Contract logs · known event types</text>
-      </g>
-      <path class="flow-wire" d="M250 170H316" marker-end="url(#flow-arrow)"/>
-      <text x="282" y="146" text-anchor="middle" class="edge-label">Indexed</text><text x="282" y="158" text-anchor="middle" class="edge-label">history</text>
-      <g class="flow-node envio-node">
-        <rect x="320" y="28" width="340" height="298" rx="16"/>
-        <text x="340" y="57" class="diagram-kicker">02 / ENVIO</text><text x="340" y="87" class="envio-title">HyperSync</text>
-        <text x="340" y="109" class="diagram-muted">Query indexed logs in forward pages</text>
-        <g class="index-cells"><path d="M566 53H640M566 67H640M566 81H640M566 95H640M578 48V100M598 48V100M618 48V100"/></g>
-        <rect class="filter-box" x="340" y="129" width="300" height="91" rx="8"/>
-        <text x="352" y="149" class="diagram-kicker">SERVER-SIDE FILTER</text>
-        <text x="352" y="170" class="diagram-label">Market address + event topics</text>
-        <text id="flow-range" x="352" y="190" class="diagram-mono">Block range —</text>
-        <text x="352" y="207" class="diagram-muted">Only this market's matched logs</text>
-        <path class="flow-wire" d="M490 220V240" marker-end="url(#flow-arrow)"/>
-        <rect id="flow-response-box" class="payload-box" x="340" y="245" width="300" height="60" rx="8"/>
-        <text x="352" y="265" class="diagram-label">Logs + related block timestamps</text>
-        <text id="flow-page" x="352" y="285" class="diagram-mono">Response page: not reported</text>
-      </g>
-      <path class="flow-wire request-wire" d="M734 131H668" marker-end="url(#flow-arrow)"/>
-      <text x="700" y="116" text-anchor="middle" class="edge-label">Request</text>
-      <path class="flow-wire" d="M660 275H734" marker-end="url(#flow-arrow)"/>
-      <text x="700" y="252" text-anchor="middle" class="edge-label">Page</text>
-      <circle id="flow-request-packet" cx="730" cy="131" r="3" class="flow-packet"/>
-      <circle id="flow-response-packet" cx="665" cy="275" r="3" class="flow-packet"/>
-      <g class="flow-node">
-        <rect x="740" y="28" width="240" height="298" rx="16"/>
-        <text x="760" y="57" class="diagram-kicker">03 / YOUR COMPUTER</text><text x="760" y="84" class="diagram-title">Local archive</text>
-        <text id="flow-requests" x="760" y="114" class="diagram-mono">0 requests</text>
-        <text x="760" y="151" class="diagram-label">Check address · decode · dedupe</text>
-        <path class="flow-wire" d="M860 162V182" marker-end="url(#flow-arrow)"/>
-        <g class="archive-files"><path d="M774 208V188H921V241M780 213V194H927V247"/><rect id="flow-archive-box" x="786" y="200" width="147" height="54" rx="5"/></g>
-        <text x="800" y="220" class="diagram-mono">events.jsonl</text><text x="800" y="239" class="diagram-muted">canonical records</text>
-        <text x="760" y="278" class="diagram-muted">Saved next_block · resume here</text><text id="flow-cursor" x="760" y="302" class="cursor-value">—</text>
-      </g>
-      <path class="flow-wire deferred-wire" d="M860 326V352H507V372" marker-end="url(#flow-arrow)"/>
-      <g class="flow-node later-node"><rect id="flow-l3-box" x="330" y="377" width="330" height="68" rx="10"/><text x="350" y="401" class="diagram-label">L3 book · FIFO queues</text><text id="flow-l3" x="350" y="426" class="diagram-muted">Separate reconstruction step</text></g>
-      <path class="flow-wire deferred-wire" d="M250 408H324" marker-end="url(#flow-arrow)"/>
-      <g class="flow-node later-node"><rect x="20" y="377" width="230" height="68" rx="10"/><text x="40" y="401" class="diagram-label">Monad archive RPC</text><text x="40" y="426" class="diagram-muted">Independent verification source</text></g>
-      <path class="flow-wire deferred-wire" d="M660 408H734" marker-end="url(#flow-arrow)"/>
-      <g class="flow-node later-node"><rect id="flow-verify-box" x="740" y="377" width="240" height="68" rx="10"/><text x="760" y="401" class="diagram-label">Parity · L2 · queue checks</text><text id="flow-verify" x="760" y="426" class="diagram-muted">Not checked</text></g>
-    </svg>
-    </div>
-    <div class="flow-caption"><span id="flow-activity" role="status">Waiting for worker data.</span><span>Batch-level motion · not one dot per event</span></div>
-    <div class="readout"><div><span id="downloaded">0</span><small>events recorded</small></div><div><span id="reconstructed">0</span><small>reconstructed</small></div><div><span id="validated">0</span><small>validated</small></div></div>
-    <div id="coverage" aria-label="Block coverage"></div>
-    <details class="trace-details"><summary>Page and cursor details</summary>
-      <div id="process-stages" class="process-stages" aria-label="Current processing stages"></div>
-      <div id="page-inspector" class="page-inspector"></div>
-    </details>
-    <div class="trace-heading"><strong>Recent actions</strong><span>Last 60 actions · UTC · real telemetry</span></div>
-    <ol id="action-trace" aria-label="Recent process actions"></ol>
-  </section>
-  <section class="archive-card" aria-label="Saved data and network coverage">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/kurulabnobg.png"><title>kuruLab · Data</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="indexing.css"><link rel="stylesheet" href="terminal.css"></head>
+<body class="lab-terminal"><section id="page-loading" class="page-loading" role="status"><p id="page-loading-message">Loading local data…</p><button id="page-loading-retry" hidden>Retry</button></section>
+<main id="page-content" class="app-shell" data-load-parts="inventory" hidden>
+<div class="terminal-heading"><header class="main-header"><a class="wordmark" href="/" aria-label="kuruLab home">kuru<span>Lab</span></a><span class="wallet-placeholder" title="Wallet and execution support coming soon" aria-label="Wallet and execution support coming soon"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 5h14v4H4a2 2 0 0 1 0-4Zm0 4h16v11H4a2 2 0 0 1-2-2V7m18 6h-5v4h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>0x...</span></span><nav><a href="#data-controls">Data</a><a href="#job-panel">Logs</a><button id="jobs-open" type="button">Jobs</button></nav></header><section class="active-job-banner" aria-label="Active job"><strong id="job-headline">Local history</strong><div id="job-detail">Loading saved jobs</div></section></div>
+<div class="data-chart-layout"><section class="main-market"><div class="chart-toolbar"><strong>MON / USDC</strong><span id="chart-crosshair">Dates and times in UTC</span><label class="candle-control">Candles <select id="candle-interval" aria-label="Candle interval"><option value="604800">1 week</option><option value="86400" selected>1 day</option><option value="3600">1 hour</option><option value="60">1 minute</option></select></label><div class="chart-navigation" aria-label="Chart interaction"><button type="button" id="chart-navigate" aria-pressed="true">Navigate</button><button type="button" id="chart-select" aria-pressed="false">Select period</button></div><button type="button" id="chart-fit">All data</button></div><div class="pnl-key" hidden>Lower pane: <span>strategy P&amp;L</span> / <span>hold P&amp;L</span> · USDC</div><div id="market-chart" aria-label="Verified Trade candles with UTC dates and fills"></div><div class="chart-key"><span class="selection-key">Selected period</span><span>Verified candles · LP approval required for backtests · Drag to pan · Wheel to zoom · Select period: drag to highlight</span></div><p id="candle-status" class="suite-note">Preparing local Trade candles</p><p class="chart-attribution">TradingView Lightweight Charts™ · Copyright (c) 2025 TradingView, Inc. <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> · <a href="chart-license.txt">License</a></p></section><section id="data-controls" class="data-controls">  <section class="archive-card" aria-label="Saved data and network coverage">
     <div class="preview-heading"><strong>Market history coverage</strong><button type="button" id="refresh-head" class="secondary-button">Check finalized block</button></div>
     <p id="network-scope" class="suite-note">Loading local coverage…</p>
     <div id="archive-coverage" aria-label="Downloaded and verified block ranges"></div>
     <div class="coverage-axis"><span id="deployment-block">—</span><span id="latest-block">—</span></div>
     <div class="suite-stats"><div><span>Downloaded L3 blocks</span><strong id="saved-blocks">—</strong></div><div><span>Verified L3 blocks</span><strong id="verified-blocks">—</strong></div><div><span>Total saved data</span><strong id="saved-size">—</strong></div><div><span>Free disk space</span><strong id="free-size">—</strong></div></div>
     <p id="inventory-status" class="suite-note" role="status">Checking saved files in the background…</p>
-    <p class="suite-note">Blank areas have no recorded coverage. Trade discovery is not complete L3 data. Verified coverage uses saved validation records.</p>
+    <p class="suite-note">Blank areas have no recorded coverage. Trade indexing builds OHLC from execution prices. Candles appear as partitions pass checks. Verified coverage uses saved validation records.</p>
     <details><summary>Storage and coverage details</summary><div id="storage-details"></div></details>
   </section>
   <form id="download-form" class="archive-card">
-    <div class="preview-heading"><strong>Download market events</strong><span>MON / USDC · Monad Mainnet</span></div>
-    <div class="field-grid download-fields"><label><span>From block</span><input id="download-from" type="number" min="43660999" step="1" required></label><label><span>To block</span><input id="download-to" type="number" min="43660999" step="1" required></label></div>
-    <p class="suite-note">All market order and Trade events. 5,000-block partitions. Downloads do not change verified backtest coverage.</p>
-    <label class="confirmation"><input id="confirm-download" type="checkbox"><span>I confirm this bounded network download.</span></label>
-    <div class="download-actions"><button id="start-download" class="primary-button" type="submit" disabled>Start / resume download</button><button id="stop-download" class="secondary-button" type="button" disabled>Stop download</button></div>
-    <p id="download-message" role="status" class="suite-note"></p><p id="suite-error" role="alert" hidden></p>
-    <div id="download-jobs" aria-live="polite"></div>
+    <div class="preview-heading"><strong>Prepare market data</strong><span>MON / USDC · Monad Mainnet</span></div>
+    <details id="prepare-range"><summary>Block range · entire history by default</summary><div class="field-grid download-fields"><label><span>From block</span><input id="download-from" type="number" min="43660999" step="1" required></label><label><span>To block</span><input id="download-to" type="number" min="43660999" step="1" required></label></div></details>
+    <p class="suite-note">Download missing data, or process completed local partitions.</p>
+    <label class="confirmation"><input id="confirm-download" type="checkbox"><span>Allow this bounded Envio download.</span></label>
+    <div class="download-actions"><button id="start-download" class="primary-button" type="submit" disabled>Download + verify</button><button id="stop-download" class="secondary-button" type="button" disabled>Stop</button></div>
+    <button id="process-saved-data" class="secondary-button" type="button" disabled>Process saved data</button>
+    <p id="download-message" role="status" class="suite-note"></p>
+    <details class="prepare-help"><summary>Details</summary><p class="suite-note">Saved data uses archive RPC for verification and local Trade events for candles. No Envio download. Incomplete partitions wait. Errors stop verification; files remain saved. Candles appear after each partition passes. LP backtests also require a supported contract version.</p></details>
+
   </form>
-  <section class="lower"><div><p class="eyebrow">TRADE OHLC · 1H</p><div id="chart"></div></div><div><p class="eyebrow" id="event-count-heading">EVENTS IN LAST SAVED PAGE</p><div id="events">—</div></div></section>
-  <footer><span>Live process data · no simulated activity</span><details><summary>Pipeline details</summary><div id="details"></div></details></footer>
-  </div></article>
-</main><script src="indexing.js"></script><script src="data_suite.js"></script>
-</body></html>
+</section></div>
+<section id="job-panel" class="job-panel" aria-label="Activity log"><div class="preview-heading"><strong>Activity log · UTC</strong><select id="log-filter" aria-label="Filter activity"><option value="all">All jobs</option><option value="download">HyperSync</option><option value="verification">Reconstruction / verification</option><option value="backtest">Backtests</option><option value="chart">Local candles</option></select><button id="log-toggle" class="secondary-button" type="button" aria-expanded="true" aria-controls="log-body">Minimize</button></div><div id="log-body"><p id="suite-error" role="alert" hidden></p><ol id="activity-log" aria-live="polite"></ol></div></section>
+<dialog id="jobs-dialog" aria-labelledby="jobs-title"><div class="preview-heading"><strong id="jobs-title">Job history</strong><button id="jobs-close" type="button" class="secondary-button">Close</button></div><p class="suite-note">Saved jobs and their latest recorded state. Unmanaged means this server does not own the worker.</p><div id="job-summary"></div></dialog></main><script src="page_loading.js"></script><script src="chart_library.js"></script><script src="terminal_chart.js"></script><script src="terminal_jobs.js"></script><script src="terminal.js"></script><script src="data_suite.js"></script></body></html>

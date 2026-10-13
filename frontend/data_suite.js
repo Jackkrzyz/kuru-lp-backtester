@@ -6,13 +6,16 @@
     const n = Number(value || 0), unit = n >= 2**30 ? 'GiB' : n >= 2**20 ? 'MiB' : 'KiB';
     return (n / (unit === 'GiB' ? 2**30 : unit === 'MiB' ? 2**20 : 2**10)).toFixed(2) + ' ' + unit;
   };
-  let state = null, busy = false, initialized = false, rendered = null;
+  let state = null, busy = false, initialized = false, rendered = null, initialReady = false, customRange = false;
   function error(message) { $('suite-error').textContent = message || ''; $('suite-error').hidden = !message; }
   function controls() {
-    const running = state?.jobs?.some(job => job.running);
+    const running = state?.pipeline?.running || state?.jobs?.some(job => job.running) || state?.verification_queue?.running || state?.verifications?.some(job=>job.running);
     $('start-download').disabled = busy || running || !state?.controls_available || !state?.token_available || !state?.scope_is_finalized || !$('confirm-download').checked;
     $('stop-download').disabled = busy || !running;
     $('refresh-head').disabled = busy || !state?.controls_available;
+    $('stop-download').disabled = busy || !state?.pipeline?.running;
+    $('process-saved-data').disabled = busy || !state?.controls_available || state?.pipeline?.running || state?.verification_queue?.running || state?.verifications?.some(job=>job.running);
+    $('stop-download').disabled = busy || !(state?.pipeline?.running || state?.verification_queue?.running || state?.verifications?.some(job=>job.running));
   }
   function render(value) {
     state = value;
@@ -26,7 +29,7 @@
       ? `${number(total)} blocks since deployment · finalized at ${number(last)} · checked ${new Date(value.network.checked_at*1000).toISOString().replace('T',' ').slice(0,19)} UTC. Network event count is not known.`
       : `Latest network block not checked. Chart ends at the latest locally known block: ${number(last)}. Check the finalized block to show the full target.`;
     const target = $('archive-coverage'); target.replaceChildren();
-    for (const [name,key,style] of [['Downloaded L3','downloaded_ranges','downloaded'],['Verified L3','verified_ranges','verified'],['Trade discovery','trade_only_ranges','trade']]) {
+    for (const [name,key,style] of [['Downloaded L3','downloaded_ranges','downloaded'],['Verified L3','verified_ranges','verified'],['Trade candles indexed','trade_only_ranges','trade'],['LP backtest ready','backtest_ranges','verified']]) {
       const row=document.createElement('div'); row.className=`archive-lane ${style}`;
       const label=document.createElement('span'); label.textContent=name;
       const track=document.createElement('div'); track.className='archive-track';
@@ -50,7 +53,7 @@
     $('free-size').textContent=ready?bytes(value.free_disk_bytes):'—';
     $('inventory-status').textContent=value.inventory_error?`Storage scan failed: ${value.inventory_error}. Saved totals are retained.`
       : !ready?'Checking saved files in the background. Progress remains available.'
-      : `${value.inventory_updated_at?'Storage checked '+new Date(value.inventory_updated_at*1000).toISOString().slice(11,19)+' UTC. ':''}${value.inventory_refreshing?'Refreshing in the background.':'Storage totals refresh at most once per minute.'}`;
+      : `${value.inventory_from_saved?'Saved inventory. ':''}${value.inventory_updated_at?'Storage checked '+new Date(value.inventory_updated_at*1000).toISOString().replace('T',' ').slice(0,19)+' UTC. ':''}${value.inventory_refreshing?'Refreshing in the background.':'Storage totals refresh at most once per minute.'}`;
     const detail=$('storage-details');detail.replaceChildren();
     for(const [label,amount] of Object.entries(value.storage_bytes || {})) {
       const row=document.createElement('div');row.className='detail';
@@ -59,26 +62,19 @@
     }
     const note=document.createElement('p');note.className='suite-note';
     note.textContent=ready?`${number(value.saved_file_count)} files. Includes local caches and result files, not the SDK or source code. ${value.coverage_basis || ''} ${(value.warnings || []).join(' ')}`:'File totals and coverage are not yet measured.';detail.append(note);
-    for (const [label,key] of [['Downloaded L3','downloaded_ranges'],['Verified L3','verified_ranges'],['Trade discovery','trade_only_ranges']]) {
+    for (const [label,key] of [['Downloaded L3','downloaded_ranges'],['Verified L3','verified_ranges'],['Trade candles indexed','trade_only_ranges'],['LP backtest ready','backtest_ranges']]) {
       const ranges=document.createElement('p');ranges.className='suite-note';
       ranges.textContent=label+': '+(!ready?'Not yet measured':(value[key] || []).map(range=>`${number(range.from_block)}–${number(range.to_block)}`).join(', ') || 'None');detail.append(ranges);
     }
-    if(!initialized&&ready) {
-      const end=Math.max(first,...(value.downloaded_ranges || []).map(range=>range.to_block))+1;
-      $('download-from').value=end; $('download-to').value=end+4999;initialized=true;
+    if(!customRange&&ready) {
+      if(initialized && (Number($('download-from').value)!==first || Number($('download-to').value)!==last)) $('confirm-download').checked=false;
+      $('download-from').value=first; $('download-to').value=last;initialized=value.scope_is_finalized;
     }
     $('download-message').textContent=!value.controls_available ? 'Read-only monitor. Open the Data suite from the backtest server to start downloads.'
-      : !value.token_available ? 'Set ENVIO_API_TOKEN in the server terminal or local .env. The token stays on the server.'
-      : 'Start resumes the same range from its saved cursor. Stop affects only the job started by this server. Validation and promotion remain separate commands.';
-    const jobs=$('download-jobs');jobs.replaceChildren();
-    for(const job of value.jobs || []) {
-      const row=document.createElement('div');row.className='download-job';
-      const text=document.createElement('span');
-      text.textContent=`${job.job_id} · ${number(job.request.from_block)}–${number(job.request.to_block)} · ${job.running ? 'running' : job.phase} · ${number(job.progress?.downloaded_events)} events${job.progress?.error ? ' · '+job.progress.error : ''}`;
-      const button=document.createElement('button');button.type='button';button.className='secondary-button';button.textContent='Select range';
-      button.disabled=job.running;button.addEventListener('click',()=>{$('download-from').value=job.request.from_block;$('download-to').value=job.request.to_block;$('confirm-download').checked=false;controls();});
-      row.append(text,button);jobs.append(row);
-    }
+      : !value.token_available ? 'Downloads need ENVIO_API_TOKEN. Saved-data processing does not.'
+      : 'Saved data: RPC checks + local Trade candles.';
+    window.LabJobs?.update(value);
+    window.dispatchEvent(new CustomEvent('local-coverage', {detail:value}));
     controls();
   }
   async function request(path, payload) {
@@ -86,8 +82,13 @@
     const result=await response.json();if(!response.ok)throw new Error(result.error || `HTTP ${response.status}`);return result;
   }
   async function poll() {
-    try { render(await request('/api/data-suite'));error(''); } catch(e) { error(e.message); }
-    setTimeout(poll,document.hidden?30000:5000);
+    try {
+      const value=await request('/api/data-suite');
+      render(value);error('');
+      if (value.inventory_ready!==false) { initialReady=true;PageLoading.ready('inventory'); }
+      else if (value.inventory_error) PageLoading.error(value.inventory_error);
+    } catch(e) { PageLoading.error(e.message);error(e.message); }
+    setTimeout(poll,initialReady?(document.hidden?30000:5000):250);
   }
   async function action(path,payload) {
     busy=true;controls();error('');
@@ -96,12 +97,13 @@
     finally { busy=false;controls(); }
   }
   $('refresh-head').addEventListener('click',()=>action('/api/data-suite/head',{}));
-  $('stop-download').addEventListener('click',()=>action('/api/data-suite/stop',{}));
+  $('stop-download').addEventListener('click',()=>action(state?.pipeline?.running?'/api/data-suite/prepare-stop':'/api/data-suite/verify-stop',{}));
+  $('process-saved-data').addEventListener('click',()=>{if(!$('process-saved-data').disabled)action('/api/data-suite/prepare-local',{});});
   $('confirm-download').addEventListener('change',controls);
-  for(const id of ['download-from','download-to']) $(id).addEventListener('input',()=>{initialized=true;$('confirm-download').checked=false;controls();});
+  for(const id of ['download-from','download-to']) $(id).addEventListener('input',()=>{initialized=true;customRange=true;$('confirm-download').checked=false;controls();});
   $('download-form').addEventListener('submit',event=>{
     event.preventDefault();if($('start-download').disabled)return;
-    action('/api/data-suite/download',{market:state.market,from_block:Number($('download-from').value),to_block:Number($('download-to').value),confirm_download:$('confirm-download').checked});
+    action('/api/data-suite/prepare',{market:state.market,from_block:Number($('download-from').value),to_block:Number($('download-to').value),confirm_download:$('confirm-download').checked});
   });
   poll();
 })();

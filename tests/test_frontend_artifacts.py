@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import subprocess
 from decimal import Decimal
 from html.parser import HTMLParser
 from pathlib import Path
@@ -12,7 +13,32 @@ DATA = ROOT / "tests" / "fixtures" / "legacy_replays"
 
 
 class FrontendArtifactTests(unittest.TestCase):
-    def test_data_diagram_and_trace_share_one_panel(self) -> None:
+    def test_regular_time_sharpe_estimate_and_undefined_cases(self) -> None:
+        from kuru_backtester.server.backtest_service import resolve_node
+        subprocess.run([resolve_node(), "test_replay_analytics.js"], cwd=ROOT / "sdk_reference", check=True,
+                       capture_output=True, text=True)
+    def test_canvas_replay_forward_backward_and_cached_layers(self) -> None:
+        from kuru_backtester.server.backtest_service import resolve_node
+        subprocess.run([resolve_node(), "test_canvas_replay.js"], cwd=ROOT / "sdk_reference", check=True,
+                       capture_output=True, text=True)
+    def test_weekly_option_is_available_on_both_chart_pages(self) -> None:
+        for name in ("index.html", "indexing.html"):
+            with self.subTest(page=name):
+                page = (ROOT / "frontend" / name).read_text(encoding="utf-8")
+                self.assertIn('<option value="604800">1 week</option>', page)
+                self.assertIn('<option value="86400" selected>1 day</option>', page)
+
+    def test_terminal_dates_selection_and_replay(self) -> None:
+        from kuru_backtester.server.backtest_service import resolve_node
+        subprocess.run([resolve_node(), "test_terminal_chart.js"], cwd=ROOT / "sdk_reference", check=True,
+                       capture_output=True, text=True)
+
+    def test_initial_data_loading_and_error_recovery(self) -> None:
+        from kuru_backtester.server.backtest_service import resolve_node
+        subprocess.run([resolve_node(), "test_page_loading.js"], cwd=ROOT / "sdk_reference", check=True,
+                       capture_output=True, text=True)
+
+    def test_terminal_has_one_chart_and_one_log_panel(self) -> None:
         class PanelParser(HTMLParser):
             def __init__(self):
                 super().__init__()
@@ -37,12 +63,10 @@ class FrontendArtifactTests(unittest.TestCase):
 
         parser = PanelParser()
         parser.feed((ROOT / "frontend" / "indexing.html").read_text(encoding="utf-8"))
-        panels = [p for p in parser.panels if "instrument" in p["classes"]]
-        self.assertEqual(len(panels), 1)
-        self.assertIn("chain-map", panels[0]["classes"])
-        for element in ("flow-title", "current-action", "action-explanation", "action-trace",
-                        "downloaded", "reconstructed", "validated", "coverage", "page-inspector"):
-            self.assertIn(element, panels[0]["ids"])
+        self.assertEqual(parser.ids.count("market-chart"), 1)
+        self.assertEqual(parser.ids.count("activity-log"), 1)
+        self.assertIn("job-headline", parser.ids)
+        self.assertNotIn("flow-title", parser.ids)
         self.assertEqual(len(parser.ids), len(set(parser.ids)), "Duplicate IDs break status updates")
 
     @classmethod
@@ -156,13 +180,20 @@ class FrontendArtifactTests(unittest.TestCase):
         self.assertIn("/result`,", javascript)
         self.assertIn('method: "DELETE"', javascript)
         self.assertIn("active_order_deltas", javascript)
-        self.assertIn("chartLayer", javascript)
+        self.assertNotIn("LabChart?.replay", javascript)
+        self.assertIn("drawPriceChart();", javascript)
+        self.assertIn("drawEquityChart();", javascript)
+        self.assertIn('id="price-chart"', html)
+        self.assertIn('id="equity-chart"', html)
+        self.assertIn('id="backtest-replay" class="chart-card" hidden', html)
+        self.assertIn('aria-label="Backtest results" hidden', html)
+        self.assertIn('id="saved-run-select"', html)
         self.assertNotIn("strategy_output", javascript)
         self.assertNotIn("multi_regime_output", javascript)
         self.assertNotIn("function sdkGrid", javascript)
         self.assertNotIn("lpCatalog", javascript)
         self.assertNotIn("lp_catalog.json", javascript)
-        self.assertNotIn("sample", javascript.lower())
+        self.assertNotRegex(javascript, r'fetch\([^\n]*(?:sample\.json|mock_summary|default_timeline)')
         self.assertIn('type="number" min="0.01" step="0.01" value="0.30"', html)
         self.assertIn("kuru_sdk_adapter.js", html)
 

@@ -6,20 +6,20 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.BacktestWorkflow = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
-  function create({ panels, steps, wait, reducedMotion, onEnter }) {
+  function create({ panels, steps, wait, reducedMotion, onEnter, persistent = false }) {
     let revision = 0;
     let current = "timeframe";
     async function show(next) {
       if (!panels[next]) throw new Error("Unknown backtest step.");
       const token = ++revision;
       const previous = panels[current];
-      if (next !== current && previous && !previous.hidden) {
+      if (!persistent && next !== current && previous && !previous.hidden) {
         previous.classList.add("leaving");
         if (!reducedMotion()) await wait(160);
       }
       if (token !== revision) return false;
       Object.entries(panels).forEach(([name, panel]) => {
-        panel.hidden = name !== next;
+        panel.hidden = persistent ? false : name !== next;
         panel.classList.remove("leaving");
       });
       current = next;

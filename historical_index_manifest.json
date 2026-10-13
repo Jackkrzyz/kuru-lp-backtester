@@ -65,6 +65,15 @@
       "validation_summary": "validation_output/relatively_quiet/summary.json",
       "validation_summary_sha256": "35242428d4746ac5229ca2b2a8887b6617ad01278640ecab8177e2b92d4a484b",
       "golden_fixture": "relatively_quiet"
+    },
+    {
+      "from_block": 109142028,
+      "to_block": 109147027,
+      "event_count": 28019,
+      "path": ".cache/debug_verification/109142028-109147027/events.jsonl",
+      "sha256": "0de8ecc777efb4c7d92d513daa0e64807aabcc2810c69025236226d593f49446",
+      "validation_summary": ".cache/debug_verification/109142028-109147027/summary.json",
+      "validation_summary_sha256": "12c50631998da6f5224d0321356ccb48ae2a299fb83d6fd66c9c75d27eefe61a"
     }
   ],
   "checkpoints": [
@@ -106,6 +115,12 @@
       "path": ".cache/backtest_intervals/relatively_quiet/checkpoint.json",
       "sha256": "24713ce8fb6b024b1ba03c175daa09227248d27dcfeea4cbf15bf7d339682b88",
       "golden_fixture": "relatively_quiet"
+    },
+    {
+      "block_number": 109142027,
+      "block_timestamp": 1790716911,
+      "path": ".cache/debug_verification/109142028-109147027/checkpoint.json",
+      "sha256": "93c81cdcb977c0f9a1cc207c38e1750407bd5820bf0a6bda2457fe54b2054540"
     }
   ]
 }

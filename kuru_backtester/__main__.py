@@ -8,6 +8,7 @@ COMMANDS = {
     "serve": "server.backtest_server",
     "monitor": "server.full_history_monitor",
     "history": "history.full_history",
+    "verify-download": "history.verify_download",
     "index": "history.index_history",
     "validate": "history.reconstruction_validation_report",
     "promote": "history.promote_historical_partition",
@@ -22,7 +23,7 @@ COMMANDS = {
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(
-        description="Kuru LP backtester. Run a command with --help for its options."
+        description="kuruLab. Run a command with --help for its options."
     )
     parser.add_argument("command", choices=COMMANDS)
     # Let the selected tool own its full option parser, including --help.

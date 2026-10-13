@@ -12,6 +12,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, Sequence
@@ -33,6 +34,10 @@ DOUBLE_BPS_MULTIPLIER = 20_000
 
 class RpcError(RuntimeError):
     """Report a JSON-RPC or transport error."""
+
+
+class RpcBatchLimitError(RpcError):
+    """The provider explicitly rejected the batch size."""
 
 
 class ReconstructionError(RuntimeError):
@@ -154,11 +159,20 @@ def selector(signature: str) -> str:
 class RpcClient:
     """Small JSON-RPC client with bounded retries."""
 
-    def __init__(self, url: str, timeout: int = 60, retries: int = 5) -> None:
+    def __init__(self, url: str, timeout: int = 60, retries: int = 5,
+                 *, timestamp_batch_size: int = 50, min_request_interval: float = 0) -> None:
+        if not 1 <= timestamp_batch_size <= 100:
+            raise ValueError("timestamp_batch_size must be between 1 and 100")
+        if not math.isfinite(min_request_interval) or min_request_interval < 0:
+            raise ValueError("min_request_interval must be finite and nonnegative")
         self.url = url
         self.timeout = timeout
         self.retries = retries
         self._request_id = 0
+        self.timestamp_batch_size = timestamp_batch_size
+        self.min_request_interval = min_request_interval
+        self._last_request_at: float | None = None
+        self.observer = None
 
     def _post(self, payload: dict[str, Any] | list[dict[str, Any]]) -> Any:
         body = json.dumps(payload).encode("utf-8")
@@ -173,12 +187,48 @@ class RpcClient:
         last_error: Exception | None = None
         for attempt in range(self.retries):
             try:
+                if self._last_request_at is not None and self.min_request_interval:
+                    wait = self.min_request_interval - (time.monotonic() - self._last_request_at)
+                    if wait > 0:
+                        time.sleep(wait)
+                self._last_request_at = time.monotonic()
                 with urlopen(request, timeout=self.timeout) as response:
-                    return json.loads(response.read())
+                    result = json.loads(response.read())
+                if self.observer:
+                    requests = payload if isinstance(payload, list) else [payload]
+                    methods = {}
+                    for item in requests:
+                        methods[item["method"]] = methods.get(item["method"], 0) + 1
+                    self.observer({"kind": "rpc_response", "methods": methods,
+                                   "seconds": round(time.monotonic() - self._last_request_at, 3)})
+                return result
             except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+                if isinstance(exc, HTTPError) and exc.code == 413 and isinstance(payload, list):
+                    raise RpcBatchLimitError("RPC batch exceeds the provider payload limit") from exc
                 last_error = exc
                 if attempt + 1 < self.retries:
-                    time.sleep(min(2**attempt, 8))
+                    delay = min(2**attempt, 8)
+                    if isinstance(exc, HTTPError) and exc.code == 429:
+                        # Archive verification can exceed the public RPC quota.
+                        # Do not retry a minute-long limit after only 1–8 seconds.
+                        delay = min(15 * 2**attempt, 120)
+                        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                        if retry_after is not None:
+                            try:
+                                seconds = float(retry_after)
+                                if not math.isfinite(seconds):
+                                    raise ValueError("non-finite Retry-After")
+                                delay = max(0.0, seconds)
+                            except ValueError:
+                                try:
+                                    delay = max(0.0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                                except (ValueError, TypeError, OverflowError):
+                                    pass
+                        print(f"RPC rate limit: retrying in {delay:g}s (Retry-After={retry_after!r})", flush=True)
+                    if self.observer:
+                        self.observer({"kind": "rpc_retry", "attempt": attempt + 1,
+                                       "seconds": delay, "http_status": exc.code if isinstance(exc, HTTPError) else None})
+                    time.sleep(delay)
         raise RpcError(f"RPC request failed after {self.retries} attempts: {last_error}")
 
     def call(self, method: str, params: Sequence[Any]) -> Any:
@@ -218,6 +268,12 @@ class RpcClient:
                 }
             )
         response = self._post(requests)
+        errors = [response] if isinstance(response, dict) else response if isinstance(response, list) else []
+        for item in errors:
+            error = item.get("error") if isinstance(item, dict) else None
+            message = str(error.get("message", "") if isinstance(error, dict) else error).lower()
+            if "batch" in message and "rate" not in message and any(word in message for word in ("too large", "limit", "maximum", "exceed")):
+                raise RpcBatchLimitError(message)
         if not isinstance(response, list):
             raise RpcError("RPC returned an invalid batch response.")
         by_id = {item.get("id"): item for item in response if isinstance(item, dict)}
@@ -254,13 +310,24 @@ class RpcClient:
     def block_timestamps(self, block_numbers: Iterable[int]) -> dict[int, int]:
         unique = sorted(set(block_numbers))
         timestamps: dict[int, int] = {}
-        for offset in range(0, len(unique), 10):
-            batch_numbers = unique[offset : offset + 10]
+        offset = 0
+        while offset < len(unique):
+            batch_numbers = unique[offset : offset + self.timestamp_batch_size]
             calls = [("eth_getBlockByNumber", [hex(number), False]) for number in batch_numbers]
-            for number, result in zip(batch_numbers, self.batch(calls), strict=True):
+            try:
+                results = self.batch(calls)
+            except RpcBatchLimitError:
+                if len(batch_numbers) <= 1:
+                    raise
+                self.timestamp_batch_size = max(1, len(batch_numbers) // 2)
+                continue
+            for number, result in zip(batch_numbers, results, strict=True):
                 if not isinstance(result, dict) or "timestamp" not in result:
                     raise RpcError(f"No block header is available for block {number:,}.")
+                if "number" in result and hex_int(result["number"]) != number:
+                    raise RpcError(f"RPC returned the wrong block header for block {number:,}.")
                 timestamps[number] = hex_int(result["timestamp"])
+            offset += len(batch_numbers)
         return timestamps
 
     def contract_call(self, address: str, signature: str, block: int) -> str:

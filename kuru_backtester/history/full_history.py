@@ -10,9 +10,10 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 import json
+import hashlib
 import os
 from pathlib import Path
 import time
@@ -34,11 +35,28 @@ from kuru_backtester.engine.rebuild_from_chain import (
     RpcClient, market_parameters, validate_market,
 )
 from kuru_backtester.history.reconstruction_validation_report import cancellation_summary_audit, validation_blocks
+from kuru_backtester.history import reconstruction_profiles as profiles
 
 from kuru_backtester.paths import ROOT
 DEFAULT_JOB = ROOT / ".cache" / "full_history"
 DEFAULT_MANIFEST = ROOT / "full_history_manifest.json"
-KNOWN_IMPLEMENTATION = "7c7a6e72320d71112aaf58ad3604224f15bdf0734f5790cf79d2b04194c80d42"
+KNOWN_IMPLEMENTATION = profiles.CURRENT_IMPLEMENTATION
+
+
+class UnsupportedHistoryError(ReconstructionError):
+    """Known unsupported history; retain a gap rather than certify it."""
+
+
+def check_supported_events(events) -> None:
+    """Reject unsupported vault activity locally, before expensive RPC checks."""
+    for event in events:
+        if ((event.name == "Trade" and int(event.args["order_id"]) == 0
+             and int(event.args["filled_size"]) > 0)
+                or (event.name == "VaultParamsUpdated" and any(int(event.args[key]) for key in
+                    ("vault_ask_order_size", "vault_bid_order_size")))):
+            raise UnsupportedHistoryError(
+                f"Active vault history is not supported: {event.name} at block {event.block_number}, "
+                f"transaction {event.transaction_hash}. This partition remains unavailable for LP backtests.")
 
 
 @contextmanager
@@ -178,6 +196,21 @@ class Progress:
             self.update(force=True, phase="rate_limit_wait", retry_seconds=item["seconds"],
                         rate_limit_headers=item["headers"])
 
+    def observe_rpc(self, item: dict[str, Any]) -> None:
+        """RPC telemetry contains method counts, never endpoint credentials."""
+        self.action(item["kind"], **{key: value for key, value in item.items() if key != "kind"},
+                    partition=self.value.get("current_partition"), phase=self.value.get("phase"))
+        if item["kind"] == "rpc_response":
+            counts = dict(self.value.get("rpc_method_counts", {}))
+            for method, count in item["methods"].items():
+                counts[method] = counts.get(method, 0) + count
+            self.update(rpc_method_counts=counts, rpc_http_responses=self.value.get("rpc_http_responses", 0) + 1,
+                        rpc_response_seconds=self.value.get("rpc_response_seconds", 0) + item["seconds"],
+                        rpc_wait_until=None)
+        else:
+            self.update(force=True, rpc_wait_until=time.time() + item["seconds"],
+                        rpc_retry_count=self.value.get("rpc_retry_count", 0) + 1)
+
 
 def contract_guard(rpc: RpcClient, market: str, block: int) -> dict[str, Any]:
     """Do not apply tested explicit-queue rules to unknown code or live vaults."""
@@ -187,15 +220,47 @@ def contract_guard(rpc: RpcClient, market: str, block: int) -> dict[str, Any]:
     code = rpc.call("eth_getCode", [address, hex(block)])
     import hashlib
     code_hash = hashlib.sha256(bytes.fromhex(code[2:])).hexdigest()
-    if code_hash != KNOWN_IMPLEMENTATION:
-        raise ReconstructionError(f"Unsupported contract implementation at block {block}: {code_hash}")
+    if code_hash not in profiles.SUPPORTED_IMPLEMENTATIONS:
+        raise UnsupportedHistoryError(f"Unsupported contract implementation at block {block}: {code_hash}")
     vault = abi_decode(
         ("address", "uint256", "uint96", "uint256", "uint96", "uint96", "uint96", "uint96"),
         bytes.fromhex(rpc.contract_call(market, "getVaultParams()", block)[2:]),
     )
     if int(vault[5]) - int(vault[2]) or int(vault[6]) - int(vault[4]):
-        raise ReconstructionError(f"Active vault liquidity is not verified at block {block}")
+        raise UnsupportedHistoryError(f"Active vault liquidity is not verified at block {block}")
     return {"implementation_code_sha256": code_hash, "vault_active": False}
+
+
+def separate_deployment_logs(logs: list[dict], market: str) -> tuple[list[dict], list[dict]]:
+    """Audit the two deployment logs separately from filtered market events.
+
+    Only this market's known deployment transaction is exempt from event parity.
+    Unknown logs and later upgrades remain in parity and cause it to fail.
+    """
+    deployment_tx = "0x85f4b267e1b2a1c0062d5ce1142f3c721a071682dc73d3780b8cccfcd4086a72"
+    upgraded = "0x" + keccak(text="Upgraded(address)").hex()
+    initialized = "0x" + keccak(text="Initialized(uint64)").hex()
+    expected = {
+        upgraded: ([upgraded, "0x" + profiles.DEPLOYMENT_IMPLEMENTATION_ADDRESS[2:].zfill(64)], "0x"),
+        initialized: ([initialized], "0x" + f"{1:064x}"),
+    }
+    events, administrative = [], []
+    for log in logs:
+        normalized = l3.normalize_rpc_log(log)
+        topic = normalized["topics"][0] if normalized["topics"] else ""
+        if (market == MARKET_ADDRESS and str(log.get("address", "")).lower() == market
+                and normalized["blockNumber"] == DEPLOYMENT_BLOCK
+                and normalized["transactionHash"] == deployment_tx and topic in expected):
+            topics, data = expected[topic]
+            if normalized["topics"] != topics or normalized["data"] != data:
+                raise ReconstructionError("Unexpected deployment administrative log payload")
+            administrative.append(log)
+        else:
+            events.append(log)
+    if administrative and (len(administrative) != 2 or
+            [l3.normalize_rpc_log(log)["topics"][0] for log in administrative] != [upgraded, initialized]):
+        raise ReconstructionError("Incomplete or duplicate deployment administrative logs")
+    return events, administrative
 
 
 def starting_checkpoint(rpc: RpcClient, market: str, first: int, destination: Path) -> tuple[str, dict]:
@@ -208,12 +273,19 @@ def starting_checkpoint(rpc: RpcClient, market: str, first: int, destination: Pa
         atomic_json(destination, checkpoint_payload(market, first - 1, timestamp, parameters, l3.L3Book()))
         return content_hash(destination), guard
     guard = contract_guard(rpc, market, first - 1)
+    if guard["implementation_code_sha256"] in profiles.RECIPROCAL_LINK_IMPLEMENTATIONS:
+        book, _, _ = profiles.load_checkpoint(rpc, market, first - 1, guard["implementation_code_sha256"])
+        parameters = market_parameters(rpc, market, first - 1)
+        parameters = {key: int(parameters[key]) for key in ("price_precision", "size_precision", "tick_size", "min_size", "base_decimals", "quote_decimals")}
+        timestamp = rpc.block_timestamps([first - 1])[first - 1]
+        atomic_json(destination, checkpoint_payload(market, first - 1, timestamp, parameters, book))
+        return content_hash(destination), guard
     return capture_checkpoint(rpc.url, market, first - 1, destination), guard
 
 
 def checkpoint_payload(market: str, block: int, timestamp: int, parameters: dict, book: l3.L3Book) -> dict:
     book.check_invariants()
-    return {
+    payload = {
         "schema_version": "1.0", "market": market, "checkpoint_block": block,
         "checkpoint_timestamp": timestamp, "parameters": parameters,
         "book": {
@@ -223,6 +295,11 @@ def checkpoint_payload(market: str, block: int, timestamp: int, parameters: dict
                        for (side, price), level in sorted(book.levels.items(), key=lambda item: (not item[0][0], item[0][1]))],
         },
     }
+    metadata = profiles.head_metadata(book)
+    if metadata:
+        profiles.restore_head_metadata(book, sorted(metadata.items()))
+        payload["book"]["contract_head_prev"] = [list(item) for item in sorted(metadata.items())]
+    return payload
 
 
 def trade_candles(rows: list[dict], events: list[l3.ReplayEvent], size_precision: int) -> list[dict]:
@@ -255,8 +332,62 @@ def trade_candles(rows: list[dict], events: list[l3.ReplayEvent], size_precision
     return result
 
 
+@dataclass(frozen=True)
+class VerifiedBoundary:
+    """One immutable end checkpoint from a checked partition in this job.
+
+    Call only after validation or the saved-report hash checks. This is a
+    bounded handoff between partitions, not a cache of unchecked RPC results.
+    """
+
+    checkpoint_json: str
+    block_hash: str
+    implementation: str
+
+    @classmethod
+    def from_result(cls, directory: Path, summary: dict) -> "VerifiedBoundary":
+        data = (directory / "end_checkpoint.json").read_bytes()
+        if hashlib.sha256(data).hexdigest() != summary["end_checkpoint_sha256"]:
+            raise ReconstructionError("end checkpoint handoff hash mismatch")
+        checkpoint = json.loads(data)
+        block = summary["interval"]["to_block"]
+        if checkpoint["market"] != summary["market"] or checkpoint["checkpoint_block"] != block:
+            raise ReconstructionError("end checkpoint handoff identity mismatch")
+        if not summary["validation"]["final_l3_checkpoint_match"]:
+            raise ReconstructionError("end checkpoint handoff has no full L3 match")
+        return cls(data.decode("utf-8"), summary["boundary_block_hashes"][str(block)],
+                   summary["contract_guards"][-1]["implementation_code_sha256"])
+
+    def write_start(self, rpc: RpcClient, market: str, first: int,
+                    header: dict, destination: Path) -> tuple[str, dict] | None:
+        checkpoint = json.loads(self.checkpoint_json)
+        if checkpoint["market"] != market or checkpoint["checkpoint_block"] != first - 1:
+            return None
+        # Always check the live boundary and contract. Never reuse boundary
+        # headers across the before/after reorg checks of a new partition.
+        if header["hash"] != self.block_hash:
+            raise ReconstructionError("block hash changed at checkpoint handoff")
+        guard = contract_guard(rpc, market, first - 1)
+        if guard["implementation_code_sha256"] != self.implementation:
+            raise ReconstructionError("contract changed at checkpoint handoff")
+        parameters = market_parameters(rpc, market, first - 1)
+        if any(int(parameters[key]) != value for key, value in checkpoint["parameters"].items()):
+            raise ReconstructionError("market parameters changed at checkpoint handoff")
+        deserialize_book(checkpoint["book"]).check_invariants()
+        atomic_json(destination, checkpoint)
+        return content_hash(destination), guard
+
+
+def validation_rpc(url: str) -> RpcClient:
+    """Pace archive requests; settings affect transport only."""
+    return RpcClient(url, timeout=180,
+                     timestamp_batch_size=int(os.environ.get("KURU_RPC_TIMESTAMP_BATCH_SIZE", "50")),
+                     min_request_interval=float(os.environ.get("KURU_RPC_MIN_REQUEST_INTERVAL", "0.1")))
+
+
 def validate_partition(directory: Path, market: str, first: int, last: int,
-                       rpc: RpcClient, progress: Progress, base_count: int = 0) -> dict:
+                       rpc: RpcClient, progress: Progress, base_count: int = 0,
+                       previous: VerifiedBoundary | None = None) -> dict:
     """Bound memory to one partition; reuse all verified reconstruction rules."""
     event_path = directory / "events.jsonl"
     with event_path.open(encoding="utf-8") as source:
@@ -268,34 +399,58 @@ def validate_partition(directory: Path, market: str, first: int, last: int,
         if str(row["address"]).lower() != market or not first <= event.block_number <= last or (prior is not None and position <= prior):
             raise ReconstructionError("staged events are foreign, out of range, duplicated or unordered")
         prior = position
+    check_supported_events(events)
+    rpc.observer = progress.observe_rpc
+    progress.action("partition_input", from_block=first, to_block=last, events=len(events),
+                    event_counts=dict(Counter(event.name for event in events)), market=market)
     progress.update(force=True, phase="checkpoint", current_partition=[first, last])
     boundary_headers = rpc.batch([("eth_getBlockByNumber", [hex(block), False]) for block in (first - 1, last)])
     checkpoint_path = directory / "checkpoint.json"
-    checkpoint_hash, initial_guard = starting_checkpoint(rpc, market, first, checkpoint_path)
+    reused = previous.write_start(rpc, market, first, boundary_headers[0], checkpoint_path) if previous else None
+    checkpoint_hash, initial_guard = reused or starting_checkpoint(rpc, market, first, checkpoint_path)
+    progress.update(force=True, checkpoint_reused=reused is not None)
     guards = [initial_guard]
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     book = deserialize_book(checkpoint["book"])
     parameters = checkpoint["parameters"]
-    audit = cancellation_summary_audit(events)
-    if audit["status"] != "pass":
-        raise ReconstructionError("individual/summary cancellation audit failed")
+    progress.action("checkpoint_loaded", block=first - 1, reused=reused is not None,
+                    orders=len(book.orders), levels=len(book.levels), sha256=checkpoint_hash,
+                    implementation=initial_guard["implementation_code_sha256"])
+    # Capture reciprocal flip-pair evidence during normal replay. A flip batch
+    # summary lists requested IDs; cancelling one leg can cancel both legs.
+    # Do not apply summary IDs as additional book mutations.
+    cancellation_pairs = {}
 
     # RPC parity is checked in small ranges. Only matched market logs are used;
     # an unknown signature causes a mismatch rather than silent omission.
     progress.update(force=True, phase="rpc_parity")
     rpc_count, index = 0, 0
+    administrative_logs = []
     for start in range(first, last + 1, 500):
         end = min(last, start + 499)
         stop = index
         while stop < len(events) and events[stop].block_number <= end:
             stop += 1
-        rpc_logs = rpc.logs(market, start, end)
+        rpc_logs, administrative = separate_deployment_logs(rpc.logs(market, start, end), market)
+        administrative_logs.extend(administrative)
         l3.parity_report(rows[index:stop], rpc_logs)
         rpc_count += len(rpc_logs)
         index = stop
+        progress.action("rpc_parity_check", from_block=start, to_block=end, rpc_events=len(rpc_logs),
+                        status="pass", missing_from_either_source=0)
         progress.update(rpc_checked_block=end, rpc_events_current_partition=rpc_count)
 
-    timestamps = rpc.block_timestamps({event.block_number for event in events})
+    if market == MARKET_ADDRESS and first == DEPLOYMENT_BLOCK and len(administrative_logs) != 2:
+        raise ReconstructionError("Missing deployment administrative logs")
+
+    timestamp_blocks = sorted({event.block_number for event in events})
+    progress.update(force=True, phase="rpc_timestamps", timestamp_blocks_checked=0,
+                    timestamp_blocks_total=len(timestamp_blocks))
+    timestamps = {}
+    for offset in range(0, len(timestamp_blocks), 500):
+        timestamps.update(rpc.block_timestamps(timestamp_blocks[offset:offset + 500]))
+        progress.action("timestamp_check", checked=len(timestamps), total=len(timestamp_blocks))
+        progress.update(timestamp_blocks_checked=len(timestamps))
     if any(int(row["block_timestamp"]) != timestamps[event.block_number] for row, event in zip(rows, events, strict=True)):
         raise ReconstructionError("HyperSync/RPC block timestamps differ")
 
@@ -305,11 +460,15 @@ def validate_partition(directory: Path, market: str, first: int, last: int,
     for block in checks:
         while event_index < len(events) and events[event_index].block_number <= block:
             event = events[event_index]
-            if event.name == "Trade" and int(event.args["order_id"]) == 0 and int(event.args["filled_size"]) > 0:
-                raise ReconstructionError("unverified vault Trade encountered")
-            if event.name == "VaultParamsUpdated" and any(int(event.args[key]) for key in ("vault_ask_order_size", "vault_bid_order_size")):
-                raise ReconstructionError("unverified active vault update encountered")
-            l3.apply_event(book, event, parameters["price_precision"])
+            if event.name == "OrderCanceled":
+                order = book.orders.get(int(event.args["order_id"]))
+                pair = book.orders.get(order.flipped_id) if order else None
+                if (pair and pair.flipped_id == order.order_id and pair.owner == order.owner
+                        and pair.is_buy != order.is_buy and pair.price == order.flipped_price
+                        and pair.flipped_price == order.price):
+                    cancellation_pairs[(event.transaction_hash, order.order_id)] = pair.order_id
+                    cancellation_pairs[(event.transaction_hash, pair.order_id)] = order.order_id
+            profiles.apply_event(book, event, parameters["price_precision"], initial_guard["implementation_code_sha256"])
             counts[event.name] += 1
             event_index += 1
             if event_index % 1000 == 0:
@@ -320,16 +479,25 @@ def validate_partition(directory: Path, market: str, first: int, last: int,
         invariant_checks += 1
         l3.compare_l2(book, rpc, market, block)
         guards.append(contract_guard(rpc, market, block))
+        if guards[-1]["implementation_code_sha256"] != initial_guard["implementation_code_sha256"]:
+            raise ReconstructionError("Contract implementation changed inside this partition")
         progress.update(force=True, phase="validating", reconstructed_events=base_count + event_index,
                         reconstructed_block=block, l2_checks_current_partition=invariant_checks,
                         open_orders=len(book.orders), price_levels=len(book.levels),
                         current_event_counts=dict(counts))
+    audit = cancellation_summary_audit(events, flip_pairs=cancellation_pairs)
+    if audit["status"] != "pass":
+        raise ReconstructionError("individual/summary cancellation audit failed: " + json.dumps(audit, sort_keys=True))
+    progress.action("cancellation_audit", **audit)
+    progress.update(force=True, phase="final_l3_checkpoint")
     final_parameters = market_parameters(rpc, market, last)
     if any(int(final_parameters[key]) != int(value) for key, value in parameters.items()):
         raise ReconstructionError("market parameters changed inside this partition")
-    official, _, _ = l3.load_checkpoint(rpc, market, last)
+    official, _, _ = profiles.load_checkpoint(rpc, market, last, initial_guard["implementation_code_sha256"])
     if checkpoint_payload(market, last, 0, parameters, book)["book"] != checkpoint_payload(market, last, 0, parameters, official)["book"]:
         raise ReconstructionError("final L3 queue links differ from RPC checkpoint")
+    progress.action("final_l3_match", block=last, orders=len(book.orders), levels=len(book.levels),
+                    status="pass", queue_links="exact")
     timestamp = rpc.block_timestamps([last])[last]
     final_headers = rpc.batch([("eth_getBlockByNumber", [hex(block), False]) for block in (first - 1, last)])
     if any(before["hash"] != after["hash"] for before, after in zip(boundary_headers, final_headers, strict=True)):
@@ -357,7 +525,19 @@ def validate_partition(directory: Path, market: str, first: int, last: int,
         "timestamp_parity_status": "pass",
         "final_open_orders": len(book.orders), "final_price_levels": len(book.levels),
     }
+    if administrative_logs:
+        atomic_json(directory / "deployment_logs.json", administrative_logs)
+        summary["administrative_log_audit"] = {
+            "status": "pass", "rpc_log_count": len(administrative_logs),
+            "events": {"Upgraded": 1, "Initialized": 1},
+            "source_sha256": content_hash(directory / "deployment_logs.json"),
+            "scope": "known deployment only; excluded from canonical market-event parity",
+        }
     atomic_json(directory / "summary.json", summary)
+    progress.action("verified_partition", from_block=first, to_block=last, events=len(events),
+                    trades=counts.get("Trade", 0), candles=len(candles),
+                    source_sha256=summary["event_input"]["source_sha256"],
+                    l2_checks=invariant_checks, price_error_raw=0, size_error_raw=0)
     progress.update(force=True, phase="partition_validated", recent_candles=candles[-120:])
     return summary
 
@@ -384,6 +564,7 @@ def run_pipeline(configuration: dict, job_root: Path, manifest: Path,
     base_pages = 0
     base_bytes = 0
     counts = Counter()
+    previous = None
     for first, last in partitions(configuration["from_block"], configuration["to_block"], configuration["partition_blocks"]):
         import shutil
         if shutil.disk_usage(job_root).free < 256 * 1024 * 1024:
@@ -431,7 +612,7 @@ def run_pipeline(configuration: dict, job_root: Path, manifest: Path,
             if configuration.get("reconstruct_only") and not partition.state["complete"]:
                 raise ValueError(f"partition {first}-{last} is not downloaded; reconstruct-only will not query HyperSync")
             run_index(client, partition, configuration["market"], last + 1, page)
-            summary = validate_partition(directory, configuration["market"], first, last, rpc, progress, base_count)
+            summary = validate_partition(directory, configuration["market"], first, last, rpc, progress, base_count, previous)
             promote(manifest, partition.events_path, directory / "summary.json", directory / "checkpoint.json")
         base_count += summary["event_input"]["record_count"]
         base_pages += partition.state["page_count"]
@@ -440,6 +621,7 @@ def run_pipeline(configuration: dict, job_root: Path, manifest: Path,
         final_checkpoint = json.loads((directory / "end_checkpoint.json").read_text())
         if content_hash(directory / "end_checkpoint.json") != summary["end_checkpoint_sha256"]:
             raise ReconstructionError("resumed end checkpoint hash mismatch")
+        previous = VerifiedBoundary.from_result(directory, summary)
         partition.state.update(validation_status="validated", complete=True)
         partition.save()
         coverage = json.loads(manifest.read_text(encoding="utf-8"))["event_partitions"]
@@ -533,7 +715,7 @@ def main() -> int:
         parser.error("job-root must stay inside the project")
     args.job_root.mkdir(parents=True, exist_ok=True)
     with writer_lock(args.job_root / "writer.lock"):
-        rpc = RpcClient(args.rpc_url, timeout=180)
+        rpc = validation_rpc(args.rpc_url)
         if int(rpc.call("eth_chainId", []), 16) != 143:
             raise ValueError("RPC must use Monad Mainnet (chain ID 143)")
         saved_path = args.job_root / "job.json"

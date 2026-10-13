@@ -31,7 +31,7 @@ def support():
 
 
 class ContractMarket:
-    def __init__(self, support, rebate=0, parameters=None):
+    def __init__(self, support, rebate=0, parameters=None, runtime=None):
         from eth_tester import EthereumTester, PyEVMBackend
         self.evm = EthereumTester(PyEVMBackend())
         self.maker, self.taker = self.evm.get_accounts()[:2]
@@ -45,7 +45,13 @@ class ContractMarket:
             code_path = ROOT / ".cache/lp_contract_implementations" / f"{row.get('implementation_code_sha256', '')}.json"
         else:
             code_path = ROOT / ".cache/no_historical_implementation"
-        if code_path.is_file():
+        if runtime is not None:
+            # Historical reconstruction tests supply a hash-checked runtime.
+            runtime = runtime.removeprefix("0x")
+            length = len(runtime)//2
+            creation = f"61{length:04x}600e60003961{length:04x}6000f3"
+            impl = self.deploy("0x"+creation+runtime)
+        elif code_path.is_file():
             runtime = json.loads(code_path.read_text())["code"][2:]
             assert hashlib.sha256(bytes.fromhex(runtime)).hexdigest() == row["implementation_code_sha256"]
             length = len(runtime)//2

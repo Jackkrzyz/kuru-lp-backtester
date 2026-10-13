@@ -15,7 +15,10 @@ let snapshot={market:'0xmarket',deployment_block:100,scope_to_block:200,total_sc
   downloaded_blocks:11,verified_blocks:0,storage_bytes:{'.cache':2**20},total_saved_bytes:2**20,free_disk_bytes:2**30,
   saved_file_count:2,scope_is_finalized:true,network:{checked_at:1},controls_available:true,token_available:true,jobs:[]};
 const requests=[];let failure=null, timer;
+const loadedParts=[];
 vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/data_suite.js'),'utf8'),{
+  window:{LabJobs:{update(value){get('captured-jobs').value=value;}},dispatchEvent(){}},CustomEvent:class {},
+  PageLoading:{ready(part){loadedParts.push(part);},error(){}},
   document:{getElementById:get,createElement:()=>new Element()},Number,Date,Math,JSON,AbortSignal,setTimeout(callback){timer=callback;},
   fetch:async(path,options)=>{
     requests.push({path,options});
@@ -25,17 +28,20 @@ vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/data_suite.js'),
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
   await flush();assert.equal(requests.length,1);assert.equal(requests[0].options.method,'GET');
-  assert.equal(get('archive-coverage').children.length,3);
+  assert.equal(get('archive-coverage').children.length,4);
   assert.equal(get('archive-coverage').children[0].children[1].children[0].style.left,(10/101*100)+'%');
   assert.equal(get('verified-blocks').textContent,'0');assert.equal(get('saved-size').textContent,'1.00 MiB');
+  assert.ok(loadedParts.includes('inventory'));
   assert.equal(get('start-download').disabled,true,'Explicit confirmation is required');
   get('confirm-download').checked=true;get('confirm-download').handlers.change();
   assert.equal(get('start-download').disabled,false);
   get('download-from').value=130;get('download-to').value=140;
   get('download-form').handlers.submit({preventDefault(){}});
   assert.equal(get('start-download').disabled,true,'Disable while submitting');
+  get('download-form').handlers.submit({preventDefault(){}});
   await flush();
-  const sent=requests.find(request=>request.path==='/api/data-suite/download');
+  const sent=requests.find(request=>request.path==='/api/data-suite/prepare');
+  assert.equal(requests.filter(request=>request.path==='/api/data-suite/prepare').length,1,'Prevent duplicate launch');
   assert.deepEqual(JSON.parse(sent.options.body),{market:'0xmarket',from_block:130,to_block:140,confirm_download:true});
   get('download-from').handlers.input();assert.equal(get('confirm-download').checked,false);
   failure='Rate limit test';get('refresh-head').handlers.click();await flush();
@@ -52,5 +58,25 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(get('verified-blocks').textContent,'—');
   assert.ok(get('inventory-status').textContent.includes('background'));
   assert.equal(get('download-from').value,130,'A background refresh must not reset entered bounds');
+  snapshot={...snapshot,token_available:false,jobs:[{job_id:'abc123',request:{from_block:100,to_block:199,partition_blocks:10},
+    running:true,progress:{downloaded_events:42},verification_bounds:[100,149]}],verifications:[]};
+  timer();await flush();
+  assert.equal(get('start-download').disabled,true,'A running legacy job blocks the combined launch');
+  snapshot={...snapshot,pipeline:{running:true,phase:'planning',job_id:'pipeline'}};
+  timer();await flush();assert.equal(get('stop-download').disabled,false,'Can stop during planning');
+  get('stop-download').handlers.click();await flush();
+  assert.ok(requests.some(request=>request.path==='/api/data-suite/prepare-stop'));
+  snapshot={...snapshot,jobs:[],pipeline:{running:false,phase:'failed',error:'RPC check failed'}};
+  timer();await flush();assert.equal(get('start-download').disabled,true,'A token is required for the combined job');
+  assert.equal(get('process-saved-data').disabled,false,'Local processing needs no Envio token');
+  get('process-saved-data').handlers.click();await flush();
+  assert.ok(requests.some(request=>request.path==='/api/data-suite/prepare-local'));
+  snapshot={...snapshot,verification_queue:{running:true,phase:'verifying',progress:{}}};
+  timer();await flush();assert.equal(get('process-saved-data').disabled,true,'Do not start two verification queues');
+  get('stop-download').handlers.click();await flush();
+  assert.ok(requests.some(request=>request.path==='/api/data-suite/verify-stop'));
+  snapshot={...snapshot,controls_available:false};timer();await flush();
+  assert.equal(get('start-download').disabled,true,'Read-only monitor cannot start work');
+  assert.equal(get('process-saved-data').disabled,true);
   console.log('Data suite UI tests passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

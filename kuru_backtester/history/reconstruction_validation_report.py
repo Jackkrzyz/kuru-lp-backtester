@@ -228,9 +228,17 @@ def event_parity(
     }
 
 
-def cancellation_summary_audit(events: Sequence[ReplayEvent]) -> dict[str, Any]:
+def cancellation_summary_audit(events: Sequence[ReplayEvent], *, flip_pairs=None) -> dict[str, Any]:
+    """Summaries list requested IDs, not automatically cancelled flip partners.
+
+    Optional evidence maps (transaction hash, order ID) to its reciprocal pair,
+    observed in the verified book immediately before an individual cancellation.
+    Without that evidence the original strict one-to-one audit still applies.
+    """
+    flip_pairs = flip_pairs or {}
     individual: dict[str, Counter[int]] = defaultdict(Counter)
     summarized: dict[str, Counter[int]] = defaultdict(Counter)
+    flip_summarized: dict[str, set[int]] = defaultdict(set)
     summary_event_count = 0
     zero_sentinel_count = 0
     for event in events:
@@ -244,25 +252,35 @@ def cancellation_summary_audit(events: Sequence[ReplayEvent]) -> dict[str, Any]:
                     zero_sentinel_count += 1
                     continue
                 summarized[event.transaction_hash][order_id] += 1
+                if event.name == "FlipOrdersCanceled":
+                    flip_summarized[event.transaction_hash].add(order_id)
     missing_individual = 0
     individual_not_summarized = 0
     duplicate_individual = 0
+    paired_cancellations = 0
     for transaction_hash in set(individual) | set(summarized):
         individual_ids = individual[transaction_hash]
         summarized_ids = summarized[transaction_hash]
         missing_individual += sum((summarized_ids - individual_ids).values())
         individual_not_summarized += sum((individual_ids - summarized_ids).values())
+        for order_id, count in (individual_ids - summarized_ids).items():
+            pair = flip_pairs.get((transaction_hash, order_id))
+            if (count == 1 and individual_ids[order_id] == 1
+                    and pair in flip_summarized[transaction_hash]
+                    and individual_ids[pair] == 1 and summarized_ids[pair] == 1
+                    and flip_pairs.get((transaction_hash, pair)) == order_id):
+                paired_cancellations += 1
         duplicate_individual += sum(
             count - 1 for count in individual_ids.values() if count > 1
         )
     status = (
         "pass"
         if missing_individual == 0
-        and individual_not_summarized == 0
+        and individual_not_summarized == paired_cancellations
         and duplicate_individual == 0
         else "fail"
     )
-    return {
+    result = {
         "status": status,
         "summary_event_count": summary_event_count,
         "summary_referenced_nonzero_order_ids": sum(
@@ -281,6 +299,9 @@ def cancellation_summary_audit(events: Sequence[ReplayEvent]) -> dict[str, Any]:
             "only OrderCanceled mutates the L3 book"
         ),
     }
+    if paired_cancellations:
+        result["verified_paired_flip_cancellations_not_in_summary"] = paired_cancellations
+    return result
 
 
 def validation_blocks(
