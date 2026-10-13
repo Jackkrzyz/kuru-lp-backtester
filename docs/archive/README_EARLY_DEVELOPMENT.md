@@ -1,11 +1,17 @@
-# Kuru Market Making Backtester
+# Early kuruLab development — archive
 
 > Historical development record. Some settings, commands, and results describe earlier engines. See the [current project guide](../../README.md) and [LP contract checks](../LP_CONTRACT_PARITY.md) before using this document.
 
-> Archive notice checked 2026-10-11: the current UI has Kuru LP only, manual
-> token amounts, and a separate Data suite. Old MM demos, participation controls,
-> auto-fill buttons, and early root-script paths below are not current product
-> instructions. The recorded historical results remain unchanged.
+> Archive notice checked 2026-10-13: this document preserves earlier development
+> instructions and numerical results. It is not the current setup guide. Use the
+> [project README](../../README.md) for commands and the
+> [terminal guide](../TERMINAL_UI.md) for the UI. The current app has Kuru LP,
+> manual token amounts, verified Trade candles, a separate Canvas replay,
+> vertically stacked job banners, and saved job history. Old MM demos,
+> participation controls, auto-fill buttons, and early root-script paths below
+> are historical. The committed LP coverage is 109092028–109147027; local
+> downloaded and verified coverage can be larger. The latest complete local
+> suite passed 381 tests and 14 subtests before commit `1d8066e`.
 
 ## Documentation map
 
@@ -481,14 +487,17 @@ The tests cover the daily-file parser, ABI event decoding, exact L3 links, queue
 - [Monad network and public RPC documentation](https://docs.monad.xyz/developer-essentials/network-information)
 - [Envio HyperSync clients](https://docs.envio.dev/docs/HyperSync/hypersync-clients)
 - [Envio Monad endpoints](https://envio.dev/chains/monad)
-# Full-history indexing and live progress
+## Historical full-history indexing milestone
 
 The new `full_history.py` command joins the existing HyperSync downloader and
 verified L3 rules. It uses small resumable partitions. It does not run a strategy.
 `full_history_monitor.py` shows real data-flow counters on port 8001.
 
-See [FULL_HISTORY.md](../FULL_HISTORY.md) for commands, artifacts, validation gates,
-and the 839-event live-RPC smoke result. **The deployment implementation is not
-yet supported for verified L3 reconstruction.** Full raw download is separate
-from reconstruction and does not make the data backtestable. No lifetime
-download has been started.
+At this earlier milestone, the deployment implementation was not yet supported
+for verified L3 reconstruction and no lifetime download had started. These
+statements describe that milestone, not current local coverage. Supported early
+and intermediate reconstruction profiles now have bounded tests. See
+[the reconstruction profile guide](../LEGACY_RECONSTRUCTION.md) and
+[the current history guide](../FULL_HISTORY.md). The queue records unsupported
+partitions as gaps. Verified candles can appear before the queue finishes;
+LP approval remains a separate check.
