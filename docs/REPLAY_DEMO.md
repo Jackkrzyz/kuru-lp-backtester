@@ -81,7 +81,8 @@ and timeline hashes, saved-summary and detailed-fill hashes, and verification
 report/event/checkpoint hashes. It contains no local paths or job tokens.
 The demo's `.gitattributes` preserves exact JSON bytes across Git checkouts.
 
-The initial static bundle is about 3.55 MB. Each recording is fetched only when
+The static bundle is about 6.57 MB, including the unchanged main-app PNG
+favicon (about 3.02 MB). Each recording is fetched only when
 selected with **Load Replay**, then retained in browser memory. There is no
 background polling. Playback reads the loaded frames only.
 

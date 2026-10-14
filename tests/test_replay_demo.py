@@ -38,14 +38,16 @@ def test_demo_copies_current_rendering_without_changing_full_app():
     assert (DEMO / "assets/replay-renderer.js").read_text() == renderer_source(source)
     assert (DEMO / "assets/base.css").read_bytes() == (ROOT / "frontend/styles.css").read_bytes()
     assert (DEMO / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
+    assert (DEMO / "assets/kurulabnobg.png").read_bytes() == (ROOT / "Kurulabnobg.png").read_bytes()
+    assert 'href="assets/kurulabnobg.png"' in (DEMO / "index.html").read_text()
 
 
 def test_static_bundle_excludes_servers_credentials_and_private_metadata():
     files = list(DEMO.rglob("*"))
     assert not any(path.suffix in {".py", ".jsonl", ".log"} or path.name.startswith(".env") for path in files)
-    assert sum(path.stat().st_size for path in files if path.is_file()) < 5_000_000
+    assert sum(path.stat().st_size for path in files if path.is_file()) < 7_000_000
     for path in files:
-        if path.is_file():
+        if path.is_file() and path.suffix != ".png":
             text = path.read_text()
             assert "/api/" not in text
             assert "owner_token" not in text

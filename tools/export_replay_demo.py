@@ -123,6 +123,7 @@ def export(run_ids=DEFAULT_RUNS, root=ROOT, destination=None) -> dict:
     app_source = (root / "frontend/app.js").read_text(encoding="utf-8")
     (assets / "replay-renderer.js").write_text(renderer_source(app_source), encoding="utf-8")
     for source, target in ((root / "frontend/styles.css", assets / "base.css"),
+                           (root / "Kurulabnobg.png", assets / "kurulabnobg.png"),
                            (root / "LICENSE", destination / "LICENSE")):
         target.write_bytes(source.read_bytes())
     catalog = {"schema_version": 1, "engine_version": ENGINE_VERSION,
