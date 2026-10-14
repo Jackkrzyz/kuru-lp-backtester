@@ -99,7 +99,7 @@ function selectionChanged(){
   $('load-replay').disabled=!record;
   if(record){showConfiguration(record);$('load-status').textContent='Recorded configuration selected. Select Load Replay.';}
 }
-const welcomeKey='kurulab.replay-demo.welcome.v1';
+const welcomeKey='kurulab.replay-demo.welcome.v2';
 function dismissWelcome(){
   $('welcome-modal').close();try{localStorage.setItem(welcomeKey,'seen');}catch{}
   $('recording-select').focus();

@@ -1,8 +1,8 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../frontend/app.js'),'utf8');
 const calls=[];
-function drawing(){return {beginPath(){},moveTo(){},lineTo(){},stroke(){},fillText(){},setTransform(){},setLineDash(){calls.push(['orderLine']);},
-  arc(x,y){calls.push(['fill',this.fillStyle,x,y]);},fill(){},drawImage(...args){calls.push(['prefix',args[7]]);}};}
+function drawing(){return {beginPath(){},moveTo(x,y){if(y===196||y===211)calls.push(['fill',this.strokeStyle,x,y]);},lineTo(){},stroke(){},fillText(){},setTransform(){},setLineDash(){calls.push(['orderLine']);},
+  arc(){throw new Error('Executions must use time lanes, not price dots');},fill(){},drawImage(...args){calls.push(['prefix',args[7]]);}};}
 const screen=drawing(),window={devicePixelRatio:1};let layers=0;
 const frames=[{timestamp:'2026-01-01T00:00:00Z',bid:'1',ask:'1.2',midpoint:'1.1',marked_value:'100',hold_baseline_pnl:'0',fills:[]},
   {timestamp:'2026-01-01T00:02:00Z',bid:'1.1',ask:'1.3',midpoint:'1.2',marked_value:'101',hold_baseline_pnl:'0.5',fills:[{side:'bid',price:'1.1',timestamp:'2026-01-01T00:01:00Z'}]}];
@@ -21,6 +21,7 @@ assert.ok(calls.filter(c=>c[0]==='prefix').at(-1)[1]>initialWidth,'Forward playb
 const fill=calls.find(([kind])=>kind==='fill');
 assert.equal(fill[1],'#8894ff','Bid fills use buy markers');
 assert.equal(fill[2],422,'A fill halfway through elapsed time belongs halfway across the plot');
+assert.equal(fill[3],196,'Buy execution uses the buy lane, not its execution price on the quote axis');
 assert.equal(calls.filter(c=>c[0]==='orderLine').length,0,'No detached dashed order lines remain');
 sandbox.app.frameIndex=0;sandbox.drawPriceChart();
 assert.equal(calls.filter(c=>c[0]==='prefix').at(-1)[1],initialWidth,'Backward seek hides later data');

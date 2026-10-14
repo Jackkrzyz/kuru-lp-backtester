@@ -9,7 +9,7 @@ class Element{
   addEventListener(name,handler){this.handlers[name]=handler;}setAttribute(name,value){this.attributes[name]=value;}
   focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}
   getBoundingClientRect(){return {width:800,height:240};}
-  getContext(){return {setTransform(){},clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillText(){},drawImage(){},arc(){},fill(){}};}
+  getContext(){return this.context ||= {calls:[],setTransform(){},clearRect(){},beginPath(){},moveTo(x,y){this.calls.push(['move',x,y]);},lineTo(x,y){this.calls.push(['line',x,y]);},stroke(){},fillText(){},drawImage(){},arc(){throw new Error('Price-chart fill dots must not return');},fill(){}};}
 }
 const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
 const speeds=[1,10,50,100].map(speed=>{const button=new Element();button.dataset.speed=String(speed);return button;});
@@ -29,7 +29,7 @@ async function settle(){for(let i=0;i<12;i++)await flush();}
 (async()=>{
   await settle();assert.equal(get('welcome-modal').open,true);
   get('explore-demo').handlers.click();assert.equal(get('welcome-modal').open,false);
-  assert.equal(saved.get('kurulab.replay-demo.welcome.v1'),'seen');
+  assert.equal(saved.get('kurulab.replay-demo.welcome.v2'),'seen');
   const catalog=JSON.parse(fs.readFileSync(path.join(directory,'data/catalog.json')));
   for(const record of catalog.recordings){
     get('recording-select').value=record.run_id;get('recording-select').handlers.change();
@@ -49,9 +49,26 @@ async function settle(){for(let i=0;i<12;i++)await flush();}
     speeds[3].handlers.click();assert.equal(evaluate('app.speed'),100);assert.equal(evaluate('playbackRate()'),100);
     get('scrubber').value=String(record.frames-1);get('scrubber').handlers.input({target:get('scrubber')});
     assert.equal(evaluate('app.frameIndex'),record.frames-1);
+    const original=JSON.parse(fs.readFileSync(path.join(directory,record.file)));
+    const fills=original.compact_timeline.flatMap(frame=>frame.fills);
+    assert.equal(evaluate('replayFillsThrough(app.frameIndex).length'),fills.length);
+    for(const fill of fills.slice(-12)) {
+      assert.ok(get('replay-fills').textContent.includes(`${fill.size} MON @ ${fill.price} USDC`));
+      assert.ok(get('replay-fills').textContent.includes(fill.timestamp));
+    }
+    const context=get('price-chart').getContext();context.calls=[];evaluate('drawPriceChart()');
+    const ticks=context.calls.filter(call=>call[0]==='move'&&(call[2]===196||call[2]===211));
+    assert.equal(ticks.length,fills.length,'One execution tick per recorded fill');
+    const frames=original.compact_timeline,start=Date.parse(frames[0].timestamp),end=Date.parse(frames.at(-1).timestamp);
+    fills.forEach((fill,index)=>{
+      const expected=58+(Date.parse(fill.timestamp)-start)/Math.max(1,end-start)*(800-58-14);
+      assert.ok(Math.abs(ticks[index][1]-expected)<1e-8,'Execution uses its own timestamp, not frame spacing');
+      assert.equal(ticks[index][2],['buy','bid'].includes(fill.side)?196:211,'Correct side lane');
+    });
     assert.equal(get('current-frame').textContent,record.frames.toLocaleString());
     get('scrubber').value='0';get('scrubber').handlers.input({target:get('scrubber')});
     assert.equal(evaluate('app.frameIndex'),0,'Backward scrubbing is supported');
+    assert.equal(evaluate('replayFillsThrough(0).length'),original.compact_timeline[0].fills.length);
   }
   const missing=catalog.recordings[0];failure=missing.file;evaluate('loadedFiles.clear()');
   get('recording-select').value=missing.run_id;get('recording-select').handlers.change();await get('load-replay').handlers.click();

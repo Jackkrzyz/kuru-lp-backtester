@@ -31,7 +31,7 @@
 
 
         <section id="backtest-replay" class="chart-card" hidden>
-          <div class="replay-legend"><strong>Backtest replay · Canvas</strong><span>Best bid / ask · Fill dots: execution price</span></div>
+          <div class="replay-legend"><strong>Backtest replay · Canvas</strong><span>Best bid / ask · Buy / sell lanes show execution times</span></div>
           <canvas id="price-chart" aria-label="Backtest prices, simulated orders, and fills"></canvas>
           <div class="replay-legend"><strong>Portfolio value · USDC</strong><span>Strategy (orange) · Hold (gray)</span></div>
           <canvas id="equity-chart" aria-label="Strategy portfolio value and hold baseline"></canvas>
@@ -89,6 +89,7 @@
               <span id="block-label" class="block-label">Block —</span>
             </div>
             <div id="orders-list" class="orders-list"></div>
+            <details><summary>Recorded executions</summary><div id="replay-fills"></div></details>
             <div class="event-strip">
               <span>Frame actions</span>
               <strong id="frame-actions">—</strong>

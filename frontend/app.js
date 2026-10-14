@@ -702,6 +702,7 @@ function renderFrame(index) {
   const actionText = [frame.placements.length ? `${frame.placements.length} placed` : "", frame.activations.length ? `${frame.activations.length} active` : "", frame.cancellations.length ? `${frame.cancellations.length} canceled` : "", frame.fills.length ? `${frame.fills.length} filled` : ""].filter(Boolean).join(" · ");
   $("frame-actions").textContent = actionText || "Market update only";
   renderOrders(frame, app.frameIndex);
+  renderReplayFills();
   const chartStarted = performance.now();
   drawPriceChart();
   drawEquityChart();
@@ -796,12 +797,37 @@ function drawLayerPrefix(context, layer, width, height, frameIndex, frameCount) 
   );
 }
 
+// Keep executions separate from the historical quote path. Counterfactual LP
+// executions can have a different price from the unchanged historical quotes.
+function replayFillsThrough(index) {
+  return app.replay.frames.slice(0, index + 1).flatMap(frame => (frame.fills || []).map(fill => ({
+    ...fill, timestamp: fill.timestamp || frame.timestamp, block: fill.block ?? frame.block,
+  })));
+}
+
+function renderReplayFills() {
+  const target = $("replay-fills");
+  if (!target) return;
+  const fills = replayFillsThrough(app.frameIndex);
+  target.replaceChildren();
+  const count = document.createElement("p");
+  count.textContent = `${fills.length} executions through this frame · Latest 12 shown · Recorded execution prices, not historical quotes`;
+  target.append(count);
+  for (const fill of fills.slice(-12).reverse()) {
+    const row = document.createElement("div");
+    row.className = "replay-fill-row";
+    // textContent keeps imported recording values out of HTML markup.
+    row.textContent = `${fill.timestamp} · Block ${fill.block} · ${fill.side} · ${fill.size} MON @ ${fill.price} USDC · ${fill.order_id}`;
+    target.append(row);
+  }
+}
+
 function drawPriceChart() {
   const { context, width, height } = prepareCanvas($("price-chart"));
   const frames = app.replay.frames;
-  const padding = { left: 58, right: 14, top: 12, bottom: 22 };
+  const padding = { left: 58, right: 14, top: 12, bottom: 58 };
   const layer = chartLayer("price", width, height, (layerContext) => {
-    const prices = frames.flatMap(frame => [frame.bid, frame.ask, ...(frame.fills || []).map(fill => fill.price)]);
+    const prices = frames.flatMap(frame => [frame.bid, frame.ask]);
     const scale = replayTimeScale(frames, chartScale(prices.map(value => value == null ? NaN : Number(value)), width, height, padding));
     drawLine(layerContext, frames, "bid", scale, "#8894ff", 1.2);
     drawLine(layerContext, frames, "ask", scale, "#f2aa79", 1.2);
@@ -810,12 +836,17 @@ function drawPriceChart() {
   const scale = layer.scale;
   drawGrid(context, width, height, padding, scale, (value) => value.toFixed(5));
   drawLayerPrefix(context, layer, width, height, app.frameIndex, frames.length);
-  const now = Date.parse(frames[app.frameIndex].timestamp);
-  for (const frame of frames.slice(0, app.frameIndex + 1)) for (const fill of frame.fills || []) {
-    const stamp = Date.parse(fill.timestamp || frame.timestamp);
-    if (!Number.isFinite(stamp) || stamp > now) continue;
-    context.beginPath(); context.fillStyle = ["buy", "bid"].includes(fill.side) ? "#8894ff" : "#ed8d8d";
-    context.arc(scale.timeX(stamp), scale.y(Number(fill.price)), 3.5, 0, Math.PI * 2); context.fill();
+  context.font = "10px Inter, system-ui, sans-serif";
+  for (const [label, y, color] of [["Buy", height - 40, "#8894ff"], ["Sell", height - 25, "#ed8d8d"]]) {
+    context.fillStyle = color; context.fillText(label, 8, y + 3);
+  }
+  for (const fill of replayFillsThrough(app.frameIndex)) {
+    const stamp = Date.parse(fill.timestamp);
+    if (!Number.isFinite(stamp)) continue;
+    const buy = ["buy", "bid"].includes(fill.side);
+    const y = height - (buy ? 40 : 25), x = scale.timeX(stamp);
+    context.beginPath(); context.strokeStyle = buy ? "#8894ff" : "#ed8d8d";
+    context.lineWidth = 2; context.moveTo(x, y - 4); context.lineTo(x, y + 4); context.stroke();
   }
   drawReplayDates(context, frames, scale, height);
 }

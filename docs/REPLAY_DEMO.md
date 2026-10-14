@@ -159,6 +159,22 @@ a guarantee of exact historical wall-clock acceleration.
   Local screenshots are under `.cache/ui/static-*`; they are not deployed.
   Temporary test servers are not part of this deployment.
 
-All tracked full-application files remain unchanged on this branch. New files
-are limited to the static directory, exporter, tests, and this guide. Export
-and test evidence does not establish a public deployment.
+The initial demo export did not change full-application files. A later display-only
+update replaced price-plot fill dots in both interfaces with separate buy/sell
+execution-time lanes and an exact recorded-execution list. Market quotes retain
+their own price axis. Fill prices are not moved to the historical quote line.
+In the Curve run, repeated executions near 0.027094–0.027106 USDC are present
+in the saved recording; its material counterfactual warning remains visible.
+The engine, accounting, recordings, and their hashes are unchanged.
+
+The welcome screen has a blurred backdrop and explains the replay-only demo,
+MIT license, and GitHub source. Its versioned first-visit notice is shown again
+to visitors who dismissed the earlier version. Export and test evidence does
+not establish a public deployment.
+
+The display update passed the complete suite: **386 tests and 14 subtests**
+in **87.78 seconds**. Tests check each exported execution's timestamp and side
+lane, exact execution-list values, forward/backward seeking, and cached chart
+layers. The browser showed all 313 Curve executions and no console warnings
+or errors. The blurred welcome notice passed Tab and Escape checks. Saved
+recording hashes passed export verification again.
