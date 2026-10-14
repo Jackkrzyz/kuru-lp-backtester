@@ -31,6 +31,16 @@ def test_recorded_files_match_catalog_and_final_financial_state():
         assert frames[-1]["inventory"] == run["final_mon"]
         assert frames[-1]["cumulative_pnl"] == run["net_pnl"]
         assert record["verification"]["status"] == "pass"
+        assert run["grid_validation"]["deployable"]
+        assert len(run["initial_order_grid"]["orders"]) > 0
+    configs = [row["configuration"] for row in catalog["recordings"]]
+    assert [config["shape"] for config in configs] == ["spot", "curve", "bid_ask"]
+    for key, value in (("fee_percent", "0.5"), ("lower_range_percent", "3"),
+                       ("upper_range_percent", "3"), ("mon_amount", "10000"),
+                       ("usdc_amount", "350")):
+        assert all(config[key] == value for config in configs)
+    assert len({(row["interval"]["from_block"], row["interval"]["to_block"])
+                for row in catalog["recordings"]}) == 1
 
 
 def test_demo_copies_current_rendering_without_changing_full_app():

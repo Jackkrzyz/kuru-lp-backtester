@@ -18,23 +18,20 @@
     <nav aria-label="Demo links"><button id="about-demo" type="button" class="secondary-button">About</button><a href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
   </header>
   <main class="demo-layout">
-    <aside class="configuration-panel" aria-labelledby="recordings-title">
-      <h1 id="recordings-title">Recorded positions</h1>
-      <p class="muted">MON / USDC · Monad Mainnet</p>
-      <label for="recording-select">Recorded configuration</label>
-      <select id="recording-select" disabled><option>Loading recordings…</option></select>
-      <dl id="configuration" class="configuration"></dl>
-      <button id="load-replay" type="button" class="primary-button" disabled>Load Replay</button>
+    <div class="demo-scenes">
+    <aside id="selection-scene" class="configuration-panel demo-scene" aria-labelledby="recordings-title">
+      <h1 id="recordings-title">Backtest replay demo</h1>
+      <p class="muted data-description">Historical Kuru Data Through Envio HyperSync, reconstructed locally and backtested.</p>
+      <p class="muted">Three simple LP examples.</p>
+      <div id="shape-options" class="shape-options" role="group" aria-label="Select an LP shape"></div>
+      <label class="sr-only" for="recording-select">Recorded configuration</label>
+      <select id="recording-select" class="sr-only" disabled><option>Loading recordings…</option></select>
       <p id="load-status" class="muted" role="status">Reading the static catalog.</p>
       <p id="load-error" class="error-message" role="alert" hidden></p>
-      <details><summary>Exact recorded configuration</summary><pre id="configuration-json">Select a recording.</pre></details>
-      <p class="read-only-note">Values are read-only. Install kuruLab locally to configure and compute new backtests.</p>
-      <p class="read-only-note">Gas excluded. Historical taker behavior is held fixed.</p>
     </aside>
-    <section class="replay-workspace" aria-label="Recorded results">
-      <div id="empty-state" class="empty-state"><h2>History, replayed.</h2><p>Choose a recorded position and select <strong>Load Replay</strong>.</p></div>
+    <section id="replay-scene" class="replay-workspace demo-scene" aria-label="Recorded results" hidden inert aria-hidden="true">
       <div id="recorded-results" hidden>
-        <header class="result-heading"><div><span class="eyebrow">Recorded Kuru LP result</span><h2 id="run-title">MON / USDC</h2></div><span id="engine-version" class="muted"></span></header>
+        <header class="result-heading"><div><h2 id="run-title" tabindex="-1">MON / USDC</h2></div><div class="replay-heading-actions"><button id="choose-shape" class="secondary-button" type="button">Pick another shape</button><span class="replay-live">REPLAY <b id="replay-speed">100×</b></span></div></header><span id="engine-version" class="sr-only"></span>
         <p id="impact-warning" class="impact-warning" role="status" hidden></p>
         <section class="chart-card" aria-label="Interactive recorded replay">
           <div class="replay-legend"><strong>Market prices</strong><span>Best bid / ask · Buy / sell lanes show execution times</span></div>
@@ -48,21 +45,21 @@
             <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Replay timeline">
             <span class="frame-counter"><span id="current-frame">1</span> / <span id="total-frames">—</span></span>
             <div class="speed-controls" role="group" aria-label="Playback speed">
-              <button class="speed-button active" data-speed="1" type="button" aria-pressed="true">1x</button>
+              <button class="speed-button" data-speed="1" type="button" aria-pressed="false">1x</button>
               <button class="speed-button" data-speed="10" type="button" aria-pressed="false">10x</button>
               <button class="speed-button" data-speed="50" type="button" aria-pressed="false">50x</button>
-              <button class="speed-button" data-speed="100" type="button" aria-pressed="false">100x</button>
+              <button class="speed-button active" data-speed="100" type="button" aria-pressed="true">100x</button>
             </div>
           </div>
         </section>
         <section class="results-card" aria-labelledby="metrics-title"><h2 id="metrics-title">Recorded final results</h2><div id="metrics" class="metric-grid"></div></section>
         <section class="orders-card"><div class="section-heading"><h2>Orders at replay cursor</h2><span id="block-label">Block —</span></div><div id="orders-list" class="orders-list"></div><div class="event-strip"><span>Frame actions</span><strong id="frame-actions">—</strong></div><div id="frame-balances" class="frame-balances"></div></section>
         <details class="verification-details"><summary>Recording and verification</summary><dl id="recording-details"></dl></details>
+        <details><summary>Exact recorded configuration</summary><pre id="configuration-json">Select a recording.</pre></details>
       </div>
     </section>
+    </div>
     <footer class="assumptions">
-      <strong>Replay assumptions</strong>
-      <p>Gas costs are excluded. Simulated LP orders do not change historical taker behavior or subsequent market events. Impact warnings show where this assumption is material.</p>
       <p>This demo loads saved results. It does not compute new backtests or download historical data. <a href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">Install the full application ↗</a> · <a href="LICENSE">MIT license</a></p>
     </footer>
   </main>
@@ -70,9 +67,8 @@
     <h2 id="welcome-title" tabindex="-1">Welcome to the kuruLab replay demo</h2>
     <div id="welcome-description">
       <p>This is a demo of the backtest results replay. The full application is available on GitHub with an MIT license.</p>
-      <p>Explore recorded LP backtests generated by kuruLab using validated Kuru market history on Monad.</p>
-      <p>This hosted demo includes saved configurations, results, and interactive replay. It does not compute new backtests or download historical data.</p>
-      <p>The full MIT-licensed application is available on GitHub for local installation, including configurable backtesting and historical data preparation.</p>
+      <p>View the Spot, Curve, and Bid-Ask grids. Select a shape to start its recorded replay at 100× speed.</p>
+      <p>All three examples use the same range, spread, and deposits with verified Monad market history. Install the full application to run your own backtests.</p>
     </div>
     <div class="welcome-actions"><button id="explore-demo" type="button" class="primary-button" autofocus>Explore demo</button><a id="welcome-github" class="secondary-button" href="https://github.com/Jackkrzyz/kuru-lp-backtester" target="_blank" rel="noopener noreferrer">View GitHub</a></div>
   </dialog>

@@ -61,18 +61,20 @@ No public URL has been deployed or tested during this implementation.
 ## Actual exported recordings
 
 All three use `kuru-lp-contract-v18`. Hashes were checked against the saved
-completion markers before export. The default is the unflagged Spot recording.
+completion markers before export. The page waits for a shape selection.
+Each example uses the same blocks, a symmetric ±3% range, 0.5% spread,
+10,000 MON, and 350 USDC. The MON amount drives the SDK grid.
 
 | Run ID | Shape | Blocks, inclusive | Frames | Fills | Net P&L, USDC | Material impact |
 | --- | --- | --- | ---: | ---: | ---: | --- |
-| `lp-3dcbac7069fbb06a80b8` | Spot | 109132028–109142027 | 879 | 3 | -1.7249738019380478 | No |
-| `lp-2d41d3f8be336bf585c6` | Bid-Ask | 109097028–109107027 | 1,237 | 5 | 8.225090183399153 | No |
-| `lp-c7e25b4ab5e0a3abf683` | Curve | 109092057–109107978 | 1,500 | 313 | 25376.11838890465 | Yes, 100% |
+| `lp-995fc312c0bda392b4d2` | Spot | 109097028–109107027 | 1,244 | 10 | 4.28277063963589 | Yes, 100% |
+| `lp-6c78bf41c3fd2180bbfd` | Curve | 109097028–109107027 | 1,244 | 10 | 3.83311385926048 | Yes, 100% |
+| `lp-a726314e55a343920cd7` | Bid-Ask | 109097028–109107027 | 1,244 | 10 | 4.60431119042318 | Yes, 100% |
 
-The Curve recording is a very large position. Its saved warning is displayed
-beside its results and in the selection label. Its P&L is not presented as a
-reliable live-profit estimate. These are recorded examples, not tuned strategy
-recommendations. The selected files include exact saved configurations,
+All three retain their saved transaction-impact warnings beside the replay.
+Their P&L is not presented as a reliable live-profit estimate.
+These are basic shape examples, not tuned strategy recommendations.
+The selected files include exact saved configurations,
 intervals, metrics, impact records, initial grids, and unchanged compact frames.
 Displayed metrics are rounded; JSON retains the saved numbers.
 
@@ -81,10 +83,19 @@ and timeline hashes, saved-summary and detailed-fill hashes, and verification
 report/event/checkpoint hashes. It contains no local paths or job tokens.
 The demo's `.gitattributes` preserves exact JSON bytes across Git checkouts.
 
-The static bundle is about 6.57 MB, including the unchanged main-app PNG
-favicon (about 3.02 MB). Each recording is fetched only when
-selected with **Load Replay**, then retained in browser memory. There is no
-background polling. Playback reads the loaded frames only.
+The static bundle is less than 7 MB, including the unchanged main-app PNG
+favicon (about 3.02 MB). The three recordings are checked and retained in
+browser memory on page load. Each selection window shows its saved SDK grid
+with quote-notional bar heights and the basic configuration.
+The selected grid stays visible for 1.1 seconds before replay starts at 100×.
+The complete replay window stays hidden until the user selects a shape.
+Closing the welcome dialog does not select a shape or start playback.
+The shape windows fade out in 400 ms. The replay fades in over 700 ms while
+playback runs. The outgoing scene cannot receive keyboard or pointer input.
+**Pick another shape** stops playback and returns to the windows with a fade.
+The page then waits for another selection, including a repeat of the same shape.
+Reduced-motion settings remove the transition effects.
+There is no background polling. Playback reads the loaded frames only.
 
 ## Export and verify locally
 
@@ -112,8 +123,8 @@ committed demo without those original files.
 To select different completed records explicitly:
 
 ```bash
-python tools/export_replay_demo.py --run-id lp-3dcbac7069fbb06a80b8 \
-  --run-id lp-2d41d3f8be336bf585c6 --run-id lp-c7e25b4ab5e0a3abf683
+python tools/export_replay_demo.py --run-id lp-995fc312c0bda392b4d2 \
+  --run-id lp-6c78bf41c3fd2180bbfd --run-id lp-a726314e55a343920cd7
 ```
 
 Keep the selection small. Each exported recording must use the current engine,
@@ -138,44 +149,23 @@ Changing the recording clears the previous result. Missing or corrupt files
 produce an error; they never show a placeholder or an old result. Playback,
 pause, 1x/10x/50x/100x speed selection, and scrubbing use the saved timeline.
 Speed labels retain the local app's frame-based playback rates; they are not
-a guarantee of exact historical wall-clock acceleration.
+a guarantee of exact historical wall-clock acceleration. The demo accumulates
+elapsed time to show 100 frames per second at 100× on screens with lower refresh
+rates. It renders the final frame before stopping. A shape change, the About
+dialog, or a hidden page cancels pending automatic playback.
 
-## Verification
+## Verification — 2026-10-14
 
 - Five release tests check exported hashes and financial state, renderer/source
   reuse, private-file exclusions, failed exports, and the real static controller.
-- The controller test loads all three actual recordings and checks configuration,
-  metrics, play/pause, speed, forward/backward scrubbing, and a visible HTTP 404.
+- The controller test loads all three actual recordings and checks exact grids,
+  explicit selection, both scene fades, the return control, automatic 100×
+  playback, selection changes, configuration, metrics,
+  play/pause, speed, forward/backward scrubbing, and a visible HTTP 404.
   Its requests are restricted to static `data/*.json` files.
-- The full suite passed **386 tests and 14 subtests** in **93.47 seconds**.
-- Browser checks loaded all three recordings with no console errors or warnings.
-  The modal passed Tab, Shift+Tab, Escape, and keyboard dismissal checks.
-- Desktop and mobile checks passed. At 390 px, the page and Canvas charts had
-  no horizontal overflow; the modal was 341 × 568 px inside a 390 × 844 px
-  viewport. Its controls remained reachable. The exact configured CSP was also
-  tested locally with no console warnings or errors during valid replay loads.
-- A deliberate missing-file browser test showed HTTP 404 in the page and hid
-  results. The actual recording was not removed. The normal static server
-  recorded 36 requests to nine distinct static paths and zero `/api/` requests.
-  Local screenshots are under `.cache/ui/static-*`; they are not deployed.
-  Temporary test servers are not part of this deployment.
-
-The initial demo export did not change full-application files. A later display-only
-update replaced price-plot fill dots in both interfaces with separate buy/sell
-execution-time lanes and an exact recorded-execution list. Market quotes retain
-their own price axis. Fill prices are not moved to the historical quote line.
-In the Curve run, repeated executions near 0.027094–0.027106 USDC are present
-in the saved recording; its material counterfactual warning remains visible.
-The engine, accounting, recordings, and their hashes are unchanged.
-
-The welcome screen has a blurred backdrop and explains the replay-only demo,
-MIT license, and GitHub source. Its versioned first-visit notice is shown again
-to visitors who dismissed the earlier version. Export and test evidence does
-not establish a public deployment.
-
-The display update passed the complete suite: **386 tests and 14 subtests**
-in **87.78 seconds**. Tests check each exported execution's timestamp and side
-lane, exact execution-list values, forward/backward seeking, and cached chart
-layers. The browser showed all 313 Curve executions and no console warnings
-or errors. The blurred welcome notice passed Tab and Escape checks. Saved
-recording hashes passed export verification again.
+- All five focused release tests passed. These checks include the static
+  controller test with all three new recordings.
+- Saved financial state, timeline hashes, file hashes, and grid funding passed.
+- Market quotes retain their own price axis. Recorded executions use separate
+  buy/sell time lanes and an exact-price list.
+- These checks do not establish a public deployment.

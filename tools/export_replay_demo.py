@@ -15,9 +15,9 @@ from kuru_backtester.server.backtest_service import canonical_bytes, sha256_valu
 from kuru_backtester.history.historical_system import HistoricalEventStore, CheckpointStore
 
 DEFAULT_RUNS = (
-    "lp-3dcbac7069fbb06a80b8",
-    "lp-2d41d3f8be336bf585c6",
-    "lp-c7e25b4ab5e0a3abf683",
+    "lp-995fc312c0bda392b4d2",
+    "lp-6c78bf41c3fd2180bbfd",
+    "lp-a726314e55a343920cd7",
 )
 SUMMARY_KEYS = (
     "run_id", "engine", "engine_version", "normalized_configuration", "interval", "results",

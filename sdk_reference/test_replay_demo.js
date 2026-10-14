@@ -3,19 +3,24 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {webcrypto}=require('node:crypto');
 const directory=path.resolve(__dirname,'../replay-demo');
 class Element{
-  constructor(){this.children=[];this.handlers={};this.attributes={};this.hidden=false;this.value='';this.dataset={};this.style={};this.classList={toggle(){}};this._text='';}
+  constructor(){this.children=[];this.handlers={};this.attributes={};this.hidden=false;this.value='';this.dataset={};this.style={};this.classList={toggle(){},add(){},remove(){}};this._text='';}
   set textContent(value){this._text=String(value);this.children=[];}get textContent(){return this._text+this.children.map(item=>item.textContent).join('');}
   append(...items){this.children.push(...items);}replaceChildren(){this._text='';this.children=[];}
   addEventListener(name,handler){this.handlers[name]=handler;}setAttribute(name,value){this.attributes[name]=value;}
-  focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}
+  focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}scrollIntoView(){this.scrolled=true;}
   getBoundingClientRect(){return {width:800,height:240};}
   getContext(){return this.context ||= {calls:[],setTransform(){},clearRect(){},beginPath(){},moveTo(x,y){this.calls.push(['move',x,y]);},lineTo(x,y){this.calls.push(['line',x,y]);},stroke(){},fillText(){},drawImage(){},arc(){throw new Error('Price-chart fill dots must not return');},fill(){}};}
 }
 const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+get('replay-scene').hidden=true;get('recorded-results').hidden=true;
 const speeds=[1,10,50,100].map(speed=>{const button=new Element();button.dataset.speed=String(speed);return button;});
 const requests=[],saved=new Map(),animations=new Map();let animationId=0,failure=null;
-const sandbox={window:{devicePixelRatio:1,addEventListener(){}},document:{hidden:false,getElementById:get,createElement:()=>new Element(),
-  querySelectorAll:()=>speeds,addEventListener(){}},localStorage:{getItem:key=>saved.get(key),setItem:(key,value)=>saved.set(key,value)},
+const timers=new Map();let timerId=0;const documentHandlers={};
+const sandbox={window:{devicePixelRatio:1,addEventListener(){},matchMedia:()=>({matches:false})},document:{hidden:false,getElementById:get,createElement:()=>new Element(),
+  querySelectorAll:selector=>selector==='.shape-window'?get('shape-options').children:speeds,
+  querySelector:()=>get('shape-options').children.find(button=>button.attributes['aria-pressed']==='true'),
+  addEventListener:(name,handler)=>documentHandlers[name]=handler},localStorage:{getItem:key=>saved.get(key),setItem:(key,value)=>saved.set(key,value)},
+  setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),
   crypto:webcrypto,TextDecoder,performance:{now:()=>1},requestAnimationFrame:fn=>{animations.set(++animationId,fn);return animationId;},cancelAnimationFrame:id=>animations.delete(id),
   fetch:async url=>{requests.push(url);assert.ok(/^data\/(catalog|lp-[0-9a-f]{20})\.json$/.test(url),'No backend or external requests');
     if(url===failure)return {ok:false,status:404};const bytes=fs.readFileSync(path.join(directory,url));
@@ -25,25 +30,42 @@ vm.runInContext(fs.readFileSync(path.join(directory,'assets/replay-renderer.js')
 vm.runInContext(fs.readFileSync(path.join(directory,'demo.js'),'utf8'),sandbox);
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const evaluate=code=>vm.runInContext(code,sandbox);
-async function settle(){for(let i=0;i<12;i++)await flush();}
+async function settle(){for(let i=0;i<40;i++)await new Promise(resolve=>setTimeout(resolve,5));}
 (async()=>{
   await settle();assert.equal(get('welcome-modal').open,true);
+  assert.equal(timers.size,0,'Welcome must block automatic playback');
+  assert.equal(get('shape-options').children.length,3,`Show all three grid windows before replay: ${get('load-error').textContent}`);
+  for(const button of get('shape-options').children){
+    assert.ok(button.children[2].innerHTML.includes('<rect'),'Each shape shows its actual saved grid');
+  }
   get('explore-demo').handlers.click();assert.equal(get('welcome-modal').open,false);
+  await settle();
+  assert.equal(timers.size,0,'Closing welcome does not select a shape or start playback');
+  assert.equal(evaluate('app.replay'),null,'The page waits for an explicit shape choice');
+  assert.equal(get('replay-scene').hidden,true,'The complete replay window is hidden before selection');
   assert.equal(saved.get('kurulab.replay-demo.welcome.v2'),'seen');
   const catalog=JSON.parse(fs.readFileSync(path.join(directory,'data/catalog.json')));
   for(const record of catalog.recordings){
-    get('recording-select').value=record.run_id;get('recording-select').handlers.change();
+    get('shape-options').children.find(button=>button.dataset.runId===record.run_id).handlers.click();
     assert.equal(evaluate('app.replay'),null,'Selecting a different recording clears the previous result');
     assert.equal(get('configuration-json').textContent,JSON.stringify(record.configuration,null,2));
-    await get('load-replay').handlers.click();
+    assert.equal(timers.size,1,'Only the selected shape can schedule replay');
+    const timer=[...timers.values()][0];assert.equal(timer.delay,1100,'Leave time to view the selected grid');timers.clear();timer.fn();await settle();
     assert.equal(get('load-error').hidden,true,get('load-error').textContent);
     assert.equal(evaluate('app.replay.run_id'),record.run_id);
     assert.equal(JSON.stringify(evaluate('app.replay.results')),JSON.stringify(record.results));
     assert.equal(get('recorded-results').hidden,false);
-    get('play-button').handlers.click();assert.equal(evaluate('app.playing'),true);
+    assert.equal(get('replay-scene').hidden,false,'Replay is visible during its fade-in');
+    assert.equal(get('selection-scene').inert,true,'Fading shapes cannot receive input');
+    assert.equal(timers.size,1,'The outgoing scene is removed after its fade');
+    const fade=[...timers.values()][0];assert.equal(fade.delay,400);timers.clear();fade.fn();
+    assert.equal(get('selection-scene').hidden,true,'Only the replay remains after the transition');
+    assert.equal(evaluate('app.playing'),true,'The selected replay starts automatically');
+    assert.equal(evaluate('app.speed'),100,'Every selected shape starts at 100×');
+    assert.equal(speeds[3].attributes['aria-pressed'],'true');
     assert.equal(get('play-button').attributes['aria-label'],'Pause replay');
-    const tick=animations.get(evaluate('app.animationId'));tick(1000);
-    assert.equal(evaluate('app.frameIndex'),1,'Play advances the recorded timeline');
+    animations.get(evaluate('app.animationId'))(1000);animations.get(evaluate('app.animationId'))(1100);
+    assert.equal(evaluate('app.frameIndex'),10,'100× advances 100 frames per second regardless of display refresh');
     get('play-button').handlers.click();assert.equal(evaluate('app.playing'),false);
     assert.equal(get('play-button').attributes['aria-label'],'Play replay');
     speeds[3].handlers.click();assert.equal(evaluate('app.speed'),100);assert.equal(evaluate('playbackRate()'),100);
@@ -69,13 +91,28 @@ async function settle(){for(let i=0;i<12;i++)await flush();}
     get('scrubber').value='0';get('scrubber').handlers.input({target:get('scrubber')});
     assert.equal(evaluate('app.frameIndex'),0,'Backward scrubbing is supported');
     assert.equal(evaluate('replayFillsThrough(0).length'),original.compact_timeline[0].fills.length);
+    get('choose-shape').handlers.click();assert.equal(evaluate('app.playing'),false);
+    assert.equal(get('selection-scene').hidden,false,'Pick another shape restores the windows');
+    assert.equal(get('replay-scene').inert,true,'Outgoing replay controls cannot receive input');
+    const returnFade=[...timers.values()][0];timers.clear();returnFade.fn();
+    assert.equal(get('replay-scene').hidden,true,'Return removes the replay window');
+    assert.equal(timers.size,0,'Returning never starts another replay automatically');
+    get('about-demo').handlers.click();get('welcome-modal').handlers.cancel({preventDefault(){}});
+    assert.equal(timers.size,0,'Dismissing About after return still waits for a shape');
   }
+  const [first,second]=get('shape-options').children;first.handlers.click();second.handlers.click();
+  assert.equal(timers.size,1,'Rapid selection cancels the previous automatic start');
+  assert.equal(get('recording-select').value,second.dataset.runId);
+  get('about-demo').handlers.click();assert.equal(timers.size,0,'About cancels a pending start');
+  get('welcome-modal').handlers.cancel({preventDefault(){}});
+  sandbox.document.hidden=true;documentHandlers.visibilitychange();assert.equal(timers.size,0,'A hidden page cannot start replay');
+  sandbox.document.hidden=false;
   const missing=catalog.recordings[0];failure=missing.file;evaluate('loadedFiles.clear()');
-  get('recording-select').value=missing.run_id;get('recording-select').handlers.change();await get('load-replay').handlers.click();
+  get('recording-select').value=missing.run_id;get('recording-select').handlers.change();await evaluate('loadReplay()');
   assert.equal(get('load-error').hidden,false);assert.ok(get('load-error').textContent.includes('HTTP 404'));
   assert.equal(evaluate('app.replay'),null);assert.equal(get('recorded-results').hidden,true,'A missing file cannot show an old or placeholder result');
   assert.equal(requests.filter(url=>url==='data/catalog.json').length,1);
   get('about-demo').handlers.click();get('welcome-modal').handlers.cancel({preventDefault(){}});
   assert.equal(get('welcome-modal').open,false,'Escape dismissal is handled');
-  console.log(`Static demo integration passed: ${catalog.recordings.length} real recordings, playback, pause, speed, scrub, visible 404, static requests only`);
+  console.log(`Static demo integration passed: ${catalog.recordings.length} real recordings, exact grids, explicit selection, scene fades, return control, automatic 100× playback, selection races, pause, speed, scrub, visible 404, static requests only`);
 })().catch(error=>{console.error(error);process.exitCode=1;});
